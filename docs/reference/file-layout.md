@@ -19,8 +19,8 @@ sia-hu/
   bootstrap.sh               → clone + verify + push gate
   docs/                      → unified documentation tree (this tree)
   src/                       → source packages
-  capture-proxy/             → carrier tests, docs, roadmap
-  model_headroom/            → authority tests, docs, roadmap, TEST_PROTOCOL.md
+  capture-proxy/             → carrier tests, roadmap (docs moved to docs/capture-proxy/)
+  model_headroom/            → authority tests, roadmap, TEST_PROTOCOL.md (moved to docs/model-headroom/)
   tools/                     → repo tools
   .gitignore                 → unified ignore rules
   .python-version            → Python 3.13
@@ -89,18 +89,14 @@ model_headroom/tests/        → authority pytest tests
 
 ```
 capture-proxy/              → carrier subtree
-  PROJECT-ROADMAP.md        → carrier roadmap
-  README.md                 → carrier README
-  docs/                     → carrier docs
   tests/                    → carrier pytest tests
   config/capture-proxy.toml → canonical default config
   scripts/                  → capture_query.py, verify_routed_experts.py
+  (docs/README/roadmap moved to docs/capture-proxy/)
 
 model_headroom/             → authority subtree
-  PROJECT-ROADMAP.md        → authority roadmap (phases 1-5 complete)
-  README.md                 → authority README
-  TEST_PROTOCOL.md          → Adversarial test protocol (88 cases)
   tests/                    → authority pytest tests
+  (docs/README/roadmap/TEST_PROTOCOL moved to docs/model-headroom/)
 ```
 
 ---

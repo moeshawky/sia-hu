@@ -154,7 +154,7 @@ Measured by `ix` across the codebase:
 - **Skipped signals score 0.5** (neutral) in composite score; not_applicable signals are excluded entirely
 - **Provenance-aware scoring** — measured, synthetic, fixture, estimated, imported data classified and weighted separately
 - **Measured headroom score** separated from legacy composite with coverage and uncertainty bounds
-- **One project**: this package ships inside the root `sia-hu` project; install, config, and verify commands are root-level (see `../README.md`)
+- **One project**: this package ships inside the root `sia-hu` project; install, config, and verify commands are root-level (see `../../README.md`)
 
 ## Verification
 

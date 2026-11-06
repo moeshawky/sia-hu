@@ -42,8 +42,8 @@ sia-hu/
   bootstrap.sh              → clone + verify + push gate
   src/capture_proxy/        → carrier package (tests/ too)
   src/model_headroom/       → scoring authority package (tests/ too)
-  capture-proxy/            → carrier tests, docs, gate, roadmap
-  model_headroom/           → authority tests, docs, gate, roadmap, TEST_PROTOCOL.md
+  capture-proxy/            → carrier tests, gate, roadmap (docs moved to docs/capture-proxy/)
+  model_headroom/           → authority tests, gate, roadmap (docs moved to docs/model-headroom/)
   docs/                     → this unified documentation tree (created by this doc)
 ```
 

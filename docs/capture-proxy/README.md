@@ -348,13 +348,13 @@ both a session and a user id is written to **both** `index/sessions/` and
 `index/users/` — two views of one turn. Dedupe on `index_key` (the declared
 key, equal to `capture_id`) before counting turns.
 
-**Headroom sidecar (opt-in, off by default):** when `CAPTURE_HEADROOM` is enabled, sampled eligible captures additionally write `{CAPTURE_HEADROOM_DIR}/YYYY-MM-DD/{capture_id}.headroom.json` plus a `*weight_pairs.json` (model_headroom loader format) — post-response, async, never awaited on the response path. End-to-end example: `docs/example-headroom.md`.
+**Headroom sidecar (opt-in, off by default):** when `CAPTURE_HEADROOM` is enabled, sampled eligible captures additionally write `{CAPTURE_HEADROOM_DIR}/YYYY-MM-DD/{capture_id}.headroom.json` plus a `*weight_pairs.json` (model_headroom loader format) — post-response, async, never awaited on the response path. End-to-end example: `example-headroom.md`.
 
 Eligibility covers four of the six request types: `chat`, `completion`,
 `classification`, and `image`. **Embeddings and rerank never write a sidecar** —
 their handlers do not call `_spawn_headroom`, and the request-type filter
 rejects them. The sidecar carries the `task` label when `CAPTURE_MODEL_TASKS`
-maps the model. Full gate list: `docs/example-headroom.md` §2.
+maps the model. Full gate list: `example-headroom.md` §2.
 
 ### Operational boundary (router vs proxy)
 

@@ -21,7 +21,7 @@ editable mode plus the `headroom` extra (`pyproject.toml:30-37`): `torch>=2.15`,
 `numpy>=2.5.4`, `safetensors>=0.8.0`, `huggingface_hub>=2.4`, `transformers>=5.22.1`,
 `accelerate>=1.15`. The base install (`pip install -e .`, `pyproject.toml:14-19`)
 pulls only FastAPI/uvicorn/httpx/pydantic — no torch — so `.[headroom]` is required
-for scoring (`model_headroom/README.md:17-19`).
+for scoring (`docs/model-headroom/README.md:17-19`).
 
 The `model-headroom` entry point is declared at `pyproject.toml:44`:
 `model-headroom = "model_headroom.cli:main"`.
@@ -193,14 +193,14 @@ gradient provenance (`analysis/scoring.py:241-252`).
 **Value:**
 - Seven core signals (R-01–R-07) plus two opt-in gradient diagnostics (R-08,
   R-09) give a structured read on training headroom
-  (`model_headroom/README.md:83-95`).
+  (`docs/model-headroom/README.md:83-95`).
 - Provenance-aware scoring separates measured from synthetic/fixture/estimated
-  inputs (`model_headroom/README.md:113`, `analysis/scoring.py:100-107`).
+  inputs (`docs/model-headroom/README.md:113`, `analysis/scoring.py:100-107`).
 - Decision-grade gate prevents acting on incomplete evidence
   (`analysis/scoring.py:255-260`, exit code 2 with `--analysis-mode decision_grade`,
   `cli.py:415-420`).
 - Weights load to CPU RAM by design (NFR-01) — no GPU required
-  (`model_headroom/README.md`).
+  (`docs/model-headroom/README.md`).
 
 **Limitations:**
 - No signal is computed from raw model weights alone. Every measured signal needs
@@ -212,12 +212,12 @@ gradient provenance (`analysis/scoring.py:241-252`).
   (`analysis/orchestrator.py:455-546`, `analysis/scoring.py:44-45`).
 - R-08/R-09 gradient diagnostics require `--gradient-diagnostics` and weight pairs;
   they never affect the composite score (`analysis/orchestrator.py:548-615`,
-  `model_headroom/README.md:92-95`).
+  `docs/model-headroom/README.md:92-95`).
 - The composite score mixes neutral priors for missing signals; use the measured
   score and score range to judge reliability.
 - Single-sample or synthetic data should not be quoted as model-level claims
-  (`model_headroom/README.md`).
-- DeBERTa naming is unverified (`model_headroom/README.md`).
+  (`docs/model-headroom/README.md`).
+- DeBERTa naming is unverified (`docs/model-headroom/README.md`).
 
 ## 6. Troubleshooting
 
@@ -261,9 +261,9 @@ File:line references cited throughout are from:
 `src/model_headroom/reporting/human_report.py`,
 `src/model_headroom/models/loader.py`,
 `src/model_headroom/models/types.py`,
-`model_headroom/README.md`.
+`docs/model-headroom/README.md`.
 
 ---
 
-See also: `model_headroom/README.md` (full CLI flag reference, 19 flags,
+See also: `docs/model-headroom/README.md` (full CLI flag reference, 19 flags,
 `cli.py:parse_args`).

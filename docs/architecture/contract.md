@@ -127,6 +127,6 @@ Version bumps are additive — older records without new keys still validate.
 - `architecture/authority-carrier.md` — division of labor
 - `concepts/headroom-signals.md` — R-01 through R-09 signal reference
 - `concepts/frozen-contracts.md` — frozen dataclasses, NFR-01
-- `guides/example-headroom.md` (in capture-proxy/docs/) — end-to-end capture loop
-- `capture-proxy/docs/headroom-capture-design.md` — ADR-001 sidecar design
+- `docs/capture-proxy/example-headroom.md` — end-to-end capture loop
+- `docs/capture-proxy/headroom-capture-design.md` — ADR-001 sidecar design
 - `reference/env-vars.md` — `CAPTURE_HEADROOM*` and related env vars
