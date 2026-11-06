@@ -38,6 +38,11 @@ gguf = [
     "gguf>=0.19",
 ]
 
+[project.urls]
+Homepage = "https://github.com/moeshawky/sia-hu"
+Repository = "https://github.com/moeshawky/sia-hu"
+Issues = "https://github.com/moeshawky/sia-hu/issues"
+
 [project.scripts]
 capture-proxy = "capture_proxy.__main__:main"
 model-headroom = "model_headroom.cli:main"
