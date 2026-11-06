@@ -70,6 +70,7 @@ AGENTS.md
 thoughts.jsonl
 .mcp.json
 .opencode/
+.opencode/agents/*.md
 failed_reason.txt
 
 # === Logs ===
