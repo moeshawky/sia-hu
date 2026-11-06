@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
+import pytest
 import torch
 
 from model_headroom.analysis.orchestrator import run_analysis
@@ -130,6 +133,125 @@ def test_detect_architecture_details_dense() -> None:
         assert details.subtype == "hybrid_linear_attention"
         assert details.has_linear_attention is True
         assert details.has_full_attention is True
+
+
+def _gguf_config(expert_count: int) -> Any:
+    return SimpleNamespace(expert_count=expert_count)
+
+
+def _gguf_reader(names: list[str]) -> Any:
+    return SimpleNamespace(tensors=[SimpleNamespace(name=n) for n in names])
+
+
+def test_gguf_hybrid_tensor_names(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "model_headroom.models.gguf_loader.load_gguf_config",
+        lambda path: _gguf_config(1),
+    )
+    monkeypatch.setattr(
+        "model_headroom.models.gguf_loader.open_gguf_reader",
+        lambda path: _gguf_reader(
+            ["blk.0.ssm_alpha.weight", "blk.3.attn_q.weight", "blk.3.attn_k.weight"]
+        ),
+    )
+    details = detect_architecture_details("/tmp/model.gguf")
+    assert details.family == "dense"
+    assert details.subtype == "hybrid_linear_attention"
+    assert details.has_linear_attention is True
+    assert details.has_full_attention is True
+    assert details.has_moe is False
+    assert details.detection_source == "gguf_tensor_names"
+
+
+def test_gguf_pure_full_attention(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "model_headroom.models.gguf_loader.load_gguf_config",
+        lambda path: _gguf_config(1),
+    )
+    monkeypatch.setattr(
+        "model_headroom.models.gguf_loader.open_gguf_reader",
+        lambda path: _gguf_reader(
+            [
+                "blk.0.attn_q.weight",
+                "blk.0.attn_k.weight",
+                "blk.0.attn_v.weight",
+                "blk.0.attn_output.weight",
+            ]
+        ),
+    )
+    details = detect_architecture_details("/tmp/model.gguf")
+    assert details.has_linear_attention is False
+    assert details.has_full_attention is True
+    assert details.subtype == "hybrid_linear_attention"
+
+
+def test_gguf_attn_qkv_gate_not_full(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "model_headroom.models.gguf_loader.load_gguf_config",
+        lambda path: _gguf_config(1),
+    )
+    monkeypatch.setattr(
+        "model_headroom.models.gguf_loader.open_gguf_reader",
+        lambda path: _gguf_reader(["blk.0.attn_qkv.weight", "blk.0.attn_gate.weight"]),
+    )
+    details = detect_architecture_details("/tmp/model.gguf")
+    assert details.has_full_attention is False
+    assert details.subtype == "dense_standard"
+
+
+def test_gguf_moe_family(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "model_headroom.models.gguf_loader.load_gguf_config",
+        lambda path: _gguf_config(8),
+    )
+    monkeypatch.setattr(
+        "model_headroom.models.gguf_loader.open_gguf_reader",
+        lambda path: _gguf_reader(["blk.0.ssm_alpha.weight"]),
+    )
+    details = detect_architecture_details("/tmp/model.gguf")
+    assert details.family == "moe"
+    assert details.has_moe is True
+    assert details.has_linear_attention is True
+
+
+def test_gguf_vision_mtp(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "model_headroom.models.gguf_loader.load_gguf_config",
+        lambda path: _gguf_config(1),
+    )
+    monkeypatch.setattr(
+        "model_headroom.models.gguf_loader.open_gguf_reader",
+        lambda path: _gguf_reader(["model.visual.patch_embed.weight", "mtp.fc.weight"]),
+    )
+    details = detect_architecture_details("/tmp/model.gguf")
+    assert details.has_vision_tower is True
+    assert details.has_mtp is True
+
+
+def test_gguf_reader_error_unknown(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "model_headroom.models.gguf_loader.load_gguf_config",
+        lambda path: _gguf_config(1),
+    )
+    monkeypatch.setattr(
+        "model_headroom.models.gguf_loader.open_gguf_reader",
+        lambda path: (_ for _ in ()).throw(OSError("unreadable")),
+    )
+    details = detect_architecture_details("/tmp/model.gguf")
+    assert details.subtype == "unknown"
+    assert details.family == "unknown"
+
+
+REAL_GGUF = "/kaggle/input/models/enagic/ternary-bonsai-27b/gguf/default/1/Ternary-Bonsai-27B-Q2_0.gguf"
+
+
+@pytest.mark.skipif(not Path(REAL_GGUF).exists(), reason="real GGUF model absent")
+def test_gguf_real_model_hybrid() -> None:
+    details = detect_architecture_details(REAL_GGUF)
+    assert details.subtype == "hybrid_linear_attention"
+    assert details.has_linear_attention is True
+    assert details.has_full_attention is True
+    assert details.detection_source == "gguf_tensor_names"
 
 
 def test_coverage_metrics_computation() -> None:

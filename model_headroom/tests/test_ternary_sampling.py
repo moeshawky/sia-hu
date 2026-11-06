@@ -3,8 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pytest
 import torch
 
+from model_headroom.models.gguf_loader import _GGUFLoadError
 from model_headroom.models.ternary_sampling import sample_weight_for_effective_rank
 
 
@@ -111,18 +113,18 @@ class TestSampleWeightForEffectiveRank:
         assert results == []
 
     def test_file_not_found(self, tmp_path: Any) -> None:
-        results = sample_weight_for_effective_rank(
-            tmp_path / "missing.gguf", ["any.weight"], max_rows=32, seed=42
-        )
-        assert results == []
+        with pytest.raises(_GGUFLoadError):
+            sample_weight_for_effective_rank(
+                tmp_path / "missing.gguf", ["any.weight"], max_rows=32, seed=42
+            )
 
     def test_invalid_file(self, tmp_path: Any) -> None:
         bad_file = tmp_path / "bad.gguf"
         bad_file.write_bytes(b"not gguf")
-        results = sample_weight_for_effective_rank(
-            bad_file, ["any.weight"], max_rows=32, seed=42
-        )
-        assert results == []
+        with pytest.raises(_GGUFLoadError):
+            sample_weight_for_effective_rank(
+                bad_file, ["any.weight"], max_rows=32, seed=42
+            )
 
     def test_multiple_tensors(self, tmp_path: Any) -> None:
         shape = [16, 32]

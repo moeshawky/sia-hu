@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import importlib.util
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 import torch
 
 from model_headroom.models.gguf_loader import (
-    ARCHITECTURE_TENSOR_NAMES,
     _GGUFLoadError,
     _GGUFModelConfig,
     extract_expert_weight_from_gguf,
+    extract_gguf_weight_sample,
     load_gguf_config,
 )
 from model_headroom.models.loader import _detect_model_format
@@ -117,30 +118,6 @@ class TestGGUFLoadError:
         )
         with pytest.raises(AttributeError):
             err.message = "y"  # type: ignore[misc]
-
-
-class TestArchitectureTensorNames:
-    def test_contains_expected_architectures(self) -> None:
-        assert "mixtral" in ARCHITECTURE_TENSOR_NAMES
-        assert "qwen2moe" in ARCHITECTURE_TENSOR_NAMES
-        assert "phimoe" in ARCHITECTURE_TENSOR_NAMES
-
-    def test_each_arch_has_gate_up_down(self) -> None:
-        for arch, templates in ARCHITECTURE_TENSOR_NAMES.items():
-            assert "gate" in templates, f"{arch} missing gate"
-            assert "up" in templates, f"{arch} missing up"
-            assert "down" in templates, f"{arch} missing down"
-
-    def test_templates_use_format_placeholders(self) -> None:
-        for arch, templates in ARCHITECTURE_TENSOR_NAMES.items():
-            for role, template in templates.items():
-                assert "{layer}" in template, f"{arch}.{role} missing {{layer}}"
-                assert "{expert}" in template, f"{arch}.{role} missing {{expert}}"
-
-    def test_templates_format_correctly(self) -> None:
-        t = ARCHITECTURE_TENSOR_NAMES["mixtral"]["gate"]
-        result = t.format(layer=0, expert=3)
-        assert result == "blk.0.ffn_gate_exp.3.weight"
 
 
 @requires_gguf
@@ -270,3 +247,101 @@ class TestDetectModelFormat:
         bad.write_bytes(b"")
         with pytest.raises(ValueError, match="Cannot determine model format"):
             _detect_model_format(str(bad))
+
+
+@requires_gguf
+class TestExtractGGUFWeightSample:
+    def _fake_reader(
+        self,
+        qtype_name: str,
+        rows: int,
+        cols: Any,
+        tensor_name: str = "blk.0.ffn_gate.weight",
+    ) -> MagicMock:
+        from model_headroom.models.ternary_quants import prism_quant_size
+
+        prism_size = prism_quant_size(qtype_name)
+        if prism_size is not None:
+            block_size, type_size = prism_size
+            n_blocks = rows * (cols // block_size)
+            data = np.zeros(n_blocks * type_size, dtype=np.uint8)
+        else:
+            block_size = 1
+            data = np.zeros(rows * cols, dtype=np.float32).tobytes()
+        tensor = MagicMock()
+        qtype = MagicMock()
+        qtype.name = qtype_name
+        tensor.tensor_type = qtype
+        tensor.name = tensor_name
+        tensor.shape = (rows, cols)
+        tensor.data = data
+        reader = MagicMock()
+        reader.tensors = [tensor]
+        return reader
+
+    def test_quantized_honors_max_rows_not_block_stride(self, tmp_path: Any) -> None:
+        # Q2_0: block_size 64 over 1024 rows. Old stride -> 16 candidates; fix -> all rows.
+        gguf_path = tmp_path / "model.gguf"
+        gguf_path.write_bytes(b"fake")
+        reader = self._fake_reader("Q2_0", 1024, 512)
+        with patch(
+            "model_headroom.models.gguf_loader.open_gguf_reader",
+            return_value=reader,
+        ):
+            sample = extract_gguf_weight_sample(
+                gguf_path, "blk.0.ffn_gate.weight", max_rows=256, seed=42
+            )
+        assert sample is not None
+        assert sample.shape == (256, 512)
+        assert sample.dtype == torch.float32
+
+    def test_max_rows_larger_than_rows(self, tmp_path: Any) -> None:
+        gguf_path = tmp_path / "model.gguf"
+        gguf_path.write_bytes(b"fake")
+        reader = self._fake_reader("Q2_0", 48, 512, "blk.0.ssm_alpha.weight")
+        with patch(
+            "model_headroom.models.gguf_loader.open_gguf_reader",
+            return_value=reader,
+        ):
+            sample = extract_gguf_weight_sample(
+                gguf_path, "blk.0.ssm_alpha.weight", max_rows=256, seed=42
+            )
+        assert sample is not None
+        assert sample.shape == (48, 512)
+
+    def test_max_rows_smaller_than_rows(self, tmp_path: Any) -> None:
+        gguf_path = tmp_path / "model.gguf"
+        gguf_path.write_bytes(b"fake")
+        reader = self._fake_reader("Q2_0", 1024, 512)
+        with patch(
+            "model_headroom.models.gguf_loader.open_gguf_reader",
+            return_value=reader,
+        ):
+            sample = extract_gguf_weight_sample(
+                gguf_path, "blk.0.ffn_gate.weight", max_rows=40, seed=42
+            )
+        assert sample is not None
+        assert sample.shape == (40, 512)
+
+    def test_f32_path_unchanged(self, tmp_path: Any) -> None:
+        gguf_path = tmp_path / "model.gguf"
+        gguf_path.write_bytes(b"fake")
+        reader = self._fake_reader("F32", 100, 50, "dense.weight")
+        with patch(
+            "model_headroom.models.gguf_loader.open_gguf_reader",
+            return_value=reader,
+        ):
+            sample = extract_gguf_weight_sample(
+                gguf_path, "dense.weight", max_rows=256, seed=42
+            )
+        assert sample is not None
+        assert sample.shape == (100, 50)
+        with patch(
+            "model_headroom.models.gguf_loader.open_gguf_reader",
+            return_value=reader,
+        ):
+            sample = extract_gguf_weight_sample(
+                gguf_path, "dense.weight", max_rows=10, seed=42
+            )
+        assert sample is not None
+        assert sample.shape == (10, 50)

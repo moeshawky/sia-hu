@@ -110,6 +110,11 @@ def _compute_sha256(data: dict[str, Any] | list[Any] | str) -> str:
 
 _logger = logging.getLogger(__name__)
 _capture_write_warned = False
+# Distinct raw GGUF path strings already warned about, so the GGUF refusal is
+# logged once per path (once per distinct model deployment) rather than once per
+# eligible capture. The set lives for the process lifetime and is never reset;
+# tests use distinct paths to stay independent of it.
+_gguf_warned_paths: set[str] = set()
 
 
 def _blob_store_enabled() -> bool:
@@ -2376,7 +2381,9 @@ class CaptureProxyApp:
         (chat, completion, classification, image), valid-UUID capture_id,
         upstream success (status < 400 and no error_body),
         runtime_settings.model_path pointing at an existing directory,
-        and the interval samples this capture.
+        and the interval samples this capture. A ``.gguf`` model_path is refused
+        before the directory gate with a one-time warning naming the path; the
+        sidecar reads safetensors checkpoints only and emits nothing for GGUF.
 
         Args:
             record: Finalized CaptureRecord (status/error fields complete).
@@ -2411,6 +2418,19 @@ class CaptureProxyApp:
         if not isinstance(model_path_raw, str) or not model_path_raw:
             return
         model_path = Path(model_path_raw)
+        if model_path_raw.lower().endswith(".gguf"):
+            # GGUF is a non-goal for the sidecar (safetensors-only by contract).
+            # Refuse loudly and deduplicated: one warning per distinct raw path,
+            # then return with record.headroom still None — no silent inertness.
+            if model_path_raw not in _gguf_warned_paths:
+                _gguf_warned_paths.add(model_path_raw)
+                _logger.warning(
+                    "Headroom sidecar refused GGUF model path %r: the sidecar reads "
+                    "safetensors checkpoints only, so no sidecar will be emitted "
+                    "for this GGUF model.",
+                    model_path_raw,
+                )
+            return
         if not model_path.is_dir():
             return
         try:

@@ -188,6 +188,110 @@ class TestOfflinePath:
         assert json.loads(capsys.readouterr().out)["massive_activation_sigma"] == 1.0
 
 
+class TestLivePath:
+    def test_model_path_file_exits_one_with_gguf_guidance(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        harmful = tmp_path / "harmful.txt"
+        harmless = tmp_path / "harmless.txt"
+        harmful.write_text("prompt one\nprompt two\n")
+        harmless.write_text("prompt one\nprompt two\n")
+        model_file = tmp_path / "model.gguf"
+        model_file.write_bytes(b"\x00\x01\x02not-a-real-gguf")
+        rc = main(
+            [
+                "--model-path",
+                str(model_file),
+                "--harmful-prompts",
+                str(harmful),
+                "--harmless-prompts",
+                str(harmless),
+            ]
+        )
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert "expects a HuggingFace model directory" in err
+        assert "GGUF" in err
+        assert "provide one acquisition path" not in err
+
+    def test_model_path_missing_exits_one(self, tmp_path: Path, capsys) -> None:
+        harmful = tmp_path / "harmful.txt"
+        harmless = tmp_path / "harmless.txt"
+        harmful.write_text("prompt one\n")
+        harmless.write_text("prompt one\n")
+        rc = main(
+            [
+                "--model-path",
+                str(tmp_path / "does-not-exist"),
+                "--harmful-prompts",
+                str(harmful),
+                "--harmless-prompts",
+                str(harmless),
+            ]
+        )
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert "does not exist" in err
+        assert "provide one acquisition path" not in err
+
+    def test_model_path_dir_without_config_exits_one(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        harmful = tmp_path / "harmful.txt"
+        harmless = tmp_path / "harmless.txt"
+        harmful.write_text("prompt one\n")
+        harmless.write_text("prompt one\n")
+        model_dir = tmp_path / "model_dir"
+        model_dir.mkdir()
+        rc = main(
+            [
+                "--model-path",
+                str(model_dir),
+                "--harmful-prompts",
+                str(harmful),
+                "--harmless-prompts",
+                str(harmless),
+            ]
+        )
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert "no config.json" in err
+        assert "provide one acquisition path" not in err
+
+    def test_hub_id_is_not_rejected_by_guard(
+        self, tmp_path: Path, capsys, monkeypatch
+    ) -> None:
+        try:
+            import transformers
+        except ImportError:
+            pytest.skip("transformers not installed; cannot verify hub-id pass-through")
+        harmful = tmp_path / "harmful.txt"
+        harmless = tmp_path / "harmless.txt"
+        harmful.write_text("prompt one\n")
+        harmless.write_text("prompt one\n")
+
+        def _raise(*args, **kwargs):
+            raise OSError("offline test")
+
+        monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", _raise)
+        rc = main(
+            [
+                "--model-path",
+                "Qwen/Qwen3-1.7B",
+                "--harmful-prompts",
+                str(harmful),
+                "--harmless-prompts",
+                str(harmless),
+            ]
+        )
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert "Error loading model:" in err
+        assert "does not exist" not in err
+        assert "expects a HuggingFace model directory" not in err
+        assert "no config.json" not in err
+
+
 class TestRecoveryPath:
     def test_weight_deltas_recover_a_direction(self, tmp_path: Path, capsys) -> None:
         gen = torch.Generator().manual_seed(3)

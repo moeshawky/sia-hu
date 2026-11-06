@@ -176,6 +176,7 @@ def run_analysis(
     weight_pairs_source_type: SourceType | None = None,
     weight_pairs_verification_status: VerificationStatus | None = None,
     compute_gradient_diagnostics: bool = False,
+    weight_samples: list[Any] | None = None,
 ) -> HeadroomReport:
     """Execute all applicable headroom signals and produce a composite report.
     Resolves model type (auto-detect or override), dispatches 7 signal functions
@@ -270,10 +271,14 @@ def run_analysis(
             )
         )
 
-    if weight_pairs:
+    if weight_pairs or weight_samples:
+        rank_inputs = cast(
+            "list[Any]", weight_pairs if weight_pairs else weight_samples
+        )
+        rank_inputs_from_samples = not weight_pairs
         rank_results: list[SignalResult] = []
         pair_provenance: list[dict[str, Any]] = []
-        for pair in weight_pairs:
+        for pair in rank_inputs:
             parent_shape = None
             if effective_rank_parent_shapes is not None:
                 parent_shape = effective_rank_parent_shapes.get(pair.layer_name)
@@ -305,9 +310,14 @@ def run_analysis(
                 )
             )
         if pair_provenance:
-            report_metadata["weight_pair_provenance"] = pair_provenance
+            provenance_key = (
+                "weight_sample_provenance"
+                if rank_inputs_from_samples
+                else "weight_pair_provenance"
+            )
+            report_metadata[provenance_key] = pair_provenance
             report_metadata["effective_rank_comparability"] = _build_r03_comparability(
-                weight_pairs, rank_results
+                rank_inputs, rank_results
             )
         computed = [r for r in rank_results if r.status == "computed"]
         if computed:
@@ -337,7 +347,7 @@ def run_analysis(
             )
 
         rank_families: dict[str, Any] = {}
-        for pair, r in zip(weight_pairs, rank_results, strict=True):
+        for pair, r in zip(rank_inputs, rank_results, strict=True):
             if r.status != "computed" or r.data is None:
                 continue
             fam = get_module_family(pair.layer_name)

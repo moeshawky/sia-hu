@@ -5,75 +5,49 @@ weight tensors for model headroom analysis. All weights load to CPU RAM (NFR-01)
 
 Dependencies: gguf (optional), torch, numpy, models.types (ExpertWeights).
 Provides: load_gguf_config(), extract_expert_weight_from_gguf(),
-    extract_expert_weights_for_layer_from_gguf(), ARCHITECTURE_TENSOR_NAMES,
     read_log_scales.
 """
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 import numpy as np
 import torch
+from gguf.constants import (
+    GGUF_DEFAULT_ALIGNMENT,
+    GGUF_MAGIC,
+    GGMLQuantizationType,
+    GGUFValueType,
+)
 
 from model_headroom.models.ternary_quants import (
+    _PRISM_QUANT_SIZES,
     dequantize_ternary,
     prism_quant_size,
 )
 
+ByteOrder = Literal["<", ">"]
+
+
+class _TensorLike(Protocol):
+    name: str
+    tensor_type: object
+    shape: object
+    data: object
+
+
+class _ReaderSurface(Protocol):
+    fields: dict[str, object]
+    tensors: list[_TensorLike]
+
+
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-
-# Maps model type identifiers to GGUF tensor name templates for gate, up, and down
-# expert weight projections. Each template uses {layer} and {expert} placeholders
-# substituted at extraction time. Supported model types: mixtral (single expert naming:
-# ffn_gate_exp), qwen2moe/qwen2_moe/phimoe/qwen3moe/qwen3_5_moe/qwen3_5_text (batch
-# expert naming: ffn_gate_exps).
-ARCHITECTURE_TENSOR_NAMES: dict[str, dict[str, str]] = {
-    "mixtral": {
-        "gate": "blk.{layer}.ffn_gate_exp.{expert}.weight",
-        "up": "blk.{layer}.ffn_up_exp.{expert}.weight",
-        "down": "blk.{layer}.ffn_down_exp.{expert}.weight",
-    },
-    "qwen2moe": {
-        "gate": "blk.{layer}.ffn_gate_exps.{expert}.weight",
-        "up": "blk.{layer}.ffn_up_exps.{expert}.weight",
-        "down": "blk.{layer}.ffn_down_exps.{expert}.weight",
-    },
-    "qwen2_moe": {
-        "gate": "blk.{layer}.ffn_gate_exps.{expert}.weight",
-        "up": "blk.{layer}.ffn_up_exps.{expert}.weight",
-        "down": "blk.{layer}.ffn_down_exps.{expert}.weight",
-    },
-    "phimoe": {
-        "gate": "blk.{layer}.ffn_gate_exps.{expert}.weight",
-        "up": "blk.{layer}.ffn_up_exps.{expert}.weight",
-        "down": "blk.{layer}.ffn_down_exps.{expert}.weight",
-    },
-    "qwen3moe": {
-        "gate": "blk.{layer}.ffn_gate_exps.{expert}.weight",
-        "up": "blk.{layer}.ffn_up_exps.{expert}.weight",
-        "down": "blk.{layer}.ffn_down_exps.{expert}.weight",
-    },
-    "qwen3_5_moe": {
-        "gate": "blk.{layer}.ffn_gate_exps.{expert}.weight",
-        "up": "blk.{layer}.ffn_up_exps.{expert}.weight",
-        "down": "blk.{layer}.ffn_down_exps.{expert}.weight",
-    },
-    "qwen3_5_text": {
-        "gate": "blk.{layer}.ffn_gate_exps.{expert}.weight",
-        "up": "blk.{layer}.ffn_up_exps.{expert}.weight",
-        "down": "blk.{layer}.ffn_down_exps.{expert}.weight",
-    },
-    "qwen35": {
-        "gate": "blk.{layer}.ffn_gate_exps.{expert}.weight",
-        "up": "blk.{layer}.ffn_up_exps.{expert}.weight",
-        "down": "blk.{layer}.ffn_down_exps.{expert}.weight",
-    },
-}
 
 # GGUF architectures known to be dense (single expert). When their expert_count
 # metadata is absent, load_gguf_config defaults expert_count to 1 instead of
@@ -88,8 +62,6 @@ class _GGUFModelConfig:
     Attributes:
         architecture: Model architecture string (e.g. "mixtral", "qwen2moe",
             "qwen3moe", "qwen3_5_moe", "qwen3_5_text", "qwen2_moe").
-            Must be a non-empty string matching a key in ARCHITECTURE_TENSOR_NAMES
-            for full expert extraction support.
         expert_count: Number of experts per MoE layer. Must be > 0.
         block_count: Number of transformer layers. Must be > 0.
         intermediate_size: FFN intermediate dimension. Must be > 0.
@@ -138,6 +110,299 @@ class _GGUFLoadError(Exception):
     ]
     message: str
     recoverable: bool
+
+    def __str__(self) -> str:
+        return self.message
+
+
+class _PrismQType:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _FallbackField:
+    def __init__(self, name: str, value: object) -> None:
+        self.name = name
+        self._value = value
+
+    def contents(self, index_or_slice: object = slice(None)) -> object:
+        return self._value
+
+
+_GGUF_SCALAR_TO_NP: dict[GGUFValueType, type[np.generic]] = {
+    GGUFValueType.UINT8: np.uint8,
+    GGUFValueType.INT8: np.int8,
+    GGUFValueType.UINT16: np.uint16,
+    GGUFValueType.INT16: np.int16,
+    GGUFValueType.UINT32: np.uint32,
+    GGUFValueType.INT32: np.int32,
+    GGUFValueType.UINT64: np.uint64,
+    GGUFValueType.INT64: np.int64,
+    GGUFValueType.FLOAT32: np.float32,
+    GGUFValueType.BOOL: np.bool_,
+}
+
+
+def _gguf_shape_from_dims(dims: np.ndarray) -> tuple[int, ...]:
+    return tuple(int(d) for d in reversed(list(dims)))
+
+
+class _GGUFFallbackReader:
+    def __init__(self, path: str | Path) -> None:
+        self.data = np.memmap(str(path), mode="r", dtype=np.uint8)
+        self.byte_order = "I"
+        self.alignment = GGUF_DEFAULT_ALIGNMENT
+        offs = 0
+        magic = int(self._get(offs, np.uint32, override_order="<")[0])
+        if magic != GGUF_MAGIC:
+            raise ValueError("GGUF magic invalid")
+        offs += 4
+        version_arr = self._get(offs, np.uint32)
+        offs += 4
+        if version_arr[0] & 65535 == 0:
+            self.byte_order = "S"
+            version_arr = version_arr.view(version_arr.dtype.newbyteorder("S"))
+        version = int(version_arr[0])
+        if version not in (2, 3):
+            raise ValueError(f"Unsupported GGUF version {version}")
+        order: ByteOrder = "<" if self.byte_order == "I" else ">"
+        counts = self._get(offs, np.uint64, 2, override_order=order)
+        offs += 16
+        tensor_count = int(counts[0])
+        kv_count = int(counts[1])
+        self.fields: OrderedDict[str, _FallbackField] = OrderedDict()
+        offs = self._build_fields(offs, kv_count, order)
+        offs, tensor_fields = self._build_tensor_info(offs, tensor_count, order)
+        align_field = self.fields.get("general.alignment")
+        if align_field is not None:
+            self.alignment = int(cast("int", align_field.contents()))
+        padding = offs % self.alignment
+        if padding != 0:
+            offs += self.alignment - padding
+        self.data_offset = offs
+        self._build_tensors(offs, tensor_fields)
+        self._resolve_types()
+
+    def _get(
+        self,
+        offs: int,
+        dtype: np.dtype[np.generic] | type[np.generic],
+        count: int = 1,
+        override_order: ByteOrder | None = None,
+    ) -> np.ndarray:
+        order: ByteOrder = (
+            override_order
+            if override_order is not None
+            else ("<" if self.byte_order == "I" else ">")
+        )
+        dt = np.dtype(dtype).newbyteorder(order)
+        itemsize = int(dt.itemsize)
+        return np.frombuffer(self.data[offs : offs + itemsize * count], dtype=dt)[
+            :count
+        ]
+
+    def _get_str(self, offs: int, order: ByteOrder) -> tuple[int, bytes, int]:
+        slen = int(self._get(offs, np.uint64, override_order=order)[0])
+        offs += 8
+        raw = self.data[offs : offs + slen].tobytes()
+        offs += slen
+        return slen, raw, offs
+
+    def _read_field_value(
+        self, offs: int, gtype: GGUFValueType, order: ByteOrder
+    ) -> tuple[object, int]:
+        if gtype == GGUFValueType.STRING:
+            _, raw, offs = self._get_str(offs, order)
+            return str(raw, encoding="utf-8"), offs
+        nptype = _GGUF_SCALAR_TO_NP.get(gtype)
+        if nptype is not None:
+            val = self._get(offs, nptype, override_order=order)
+            offs += int(val.nbytes)
+            item = val.tolist()[0]
+            if gtype == GGUFValueType.BOOL:
+                return bool(item), offs
+            if gtype == GGUFValueType.FLOAT32:
+                return float(item), offs
+            return int(item), offs
+        if gtype == GGUFValueType.ARRAY:
+            raw_itype = self._get(offs, np.uint32, override_order=order)
+            offs += 4
+            alen = self._get(offs, np.uint64, override_order=order)
+            offs += 8
+            sub = GGUFValueType(int(raw_itype[0]))
+            vals = []
+            for _ in range(int(alen[0])):
+                v, offs = self._read_field_value(offs, sub, order)
+                vals.append(v)
+            return vals, offs
+        raise ValueError(f"Unhandled field type {gtype}")
+
+    def _build_fields(self, offs: int, count: int, order: ByteOrder) -> int:
+        for _ in range(count):
+            _, kdata, offs = self._get_str(offs, order)
+            name = str(kdata, encoding="utf-8")
+            raw_type = self._get(offs, np.uint32, override_order=order)
+            offs += 4
+            gtype = GGUFValueType(int(raw_type[0]))
+            value, offs = self._read_field_value(offs, gtype, order)
+            self.fields[name] = _FallbackField(name, value)
+        return offs
+
+    def _get_tensor_info_field(
+        self, offs: int, order: ByteOrder
+    ) -> tuple[int, bytes, np.ndarray, np.ndarray, np.ndarray, int]:
+        orig_offs = offs
+        _, name_data, offs = self._get_str(offs, order)
+        n_dims = int(self._get(offs, np.uint32, override_order=order)[0])
+        offs += 4
+        dims = self._get(offs, np.uint64, n_dims, override_order=order)
+        offs += int(dims.nbytes)
+        raw_dtype = self._get(offs, np.uint32, override_order=order)
+        offs += 4
+        offset_tensor = self._get(offs, np.uint64, override_order=order)
+        offs += 8
+        return (
+            orig_offs,
+            name_data,
+            dims,
+            raw_dtype,
+            offset_tensor,
+            offs,
+        )
+
+    def _build_tensor_info(
+        self, offs: int, count: int, order: ByteOrder
+    ) -> tuple[int, list[tuple[bytes, np.ndarray, np.ndarray, np.ndarray]]]:
+        fields = []
+        for _ in range(count):
+            _, name_data, dims, raw_dtype, offset_tensor, offs = (
+                self._get_tensor_info_field(offs, order)
+            )
+            fields.append((name_data, dims, raw_dtype, offset_tensor))
+        return offs, fields
+
+    def _build_tensors(
+        self,
+        start_offs: int,
+        fields: list[tuple[bytes, np.ndarray, np.ndarray, np.ndarray]],
+    ) -> None:
+        self.tensors = []
+        tensor_names = set()
+        file_size = int(self.data.shape[0])
+        sorted_fields = sorted(enumerate(fields), key=lambda t: int(t[1][3][0]))
+        for i, (name_data, dims, raw_dtype, offset_tensor) in sorted_fields:
+            name = str(name_data, encoding="utf-8")
+            if name in tensor_names:
+                raise ValueError(f"Duplicated tensor {name}")
+            tensor_names.add(name)
+            type_id = int(raw_dtype[0])
+            shape = _gguf_shape_from_dims(dims)
+            offset = int(offset_tensor[0])
+            next_offset = (
+                sorted_fields[i + 1][1][3][0]
+                if i + 1 < len(sorted_fields)
+                else file_size - start_offs
+            )
+            next_offset = int(next_offset)
+            byte_length = next_offset - offset
+            self.tensors.append(
+                _FallbackTensor(
+                    name=name,
+                    shape=shape,
+                    type_id=type_id,
+                    offset=offset,
+                    byte_length=byte_length,
+                    reader=self,
+                )
+            )
+
+    def _resolve_types(self) -> None:
+        known_ids = {int(t) for t in GGMLQuantizationType}
+        unknown = [t for t in self.tensors if t.type_id not in known_ids]
+        if not unknown:
+            for t in self.tensors:
+                t.tensor_type = GGMLQuantizationType(t.type_id)
+            return
+        matches = []
+        for qname, (block_size, type_size) in _PRISM_QUANT_SIZES.items():
+            ok = True
+            for t in unknown:
+                rows, cols = int(t.shape[0]), int(t.shape[1])
+                n_elems = rows * cols
+                if n_elems * type_size // block_size != t.byte_length:
+                    ok = False
+                    break
+            if ok:
+                matches.append(qname)
+        if len(matches) != 1:
+            bits = None
+            if unknown:
+                t = unknown[0]
+                rows, cols = int(t.shape[0]), int(t.shape[1])
+                bits = t.byte_length * 8 / (rows * cols)
+            raise _GGUFLoadError(
+                error_type="invalid_gguf",
+                message=(
+                    f"Ambiguous Prism quant type for {len(unknown)} unknown-type "
+                    f"tensors; matches={matches}; bits/weight={bits}"
+                ),
+                recoverable=False,
+            )
+        qname = matches[0]
+        prism_type = _PrismQType(qname)
+        for t in self.tensors:
+            if t.type_id in known_ids:
+                t.tensor_type = GGMLQuantizationType(t.type_id)
+            else:
+                t.tensor_type = prism_type
+
+
+class _FallbackTensor:
+    def __init__(
+        self,
+        name: str,
+        shape: tuple[int, ...] | np.ndarray,
+        type_id: int,
+        offset: int,
+        byte_length: int,
+        reader: _GGUFFallbackReader,
+    ) -> None:
+        self.name = name
+        self.shape = shape
+        self.type_id = type_id
+        self.offset = offset
+        self.byte_length = byte_length
+        self._reader = reader
+        self.tensor_type: GGMLQuantizationType | _PrismQType | None = None
+        self._data: np.ndarray | None = None
+
+    @property
+    def data(self) -> np.ndarray:
+        if self._data is None:
+            start = self._reader.data_offset + self.offset
+            self._data = self._reader.data[start : start + self.byte_length]
+        return self._data
+
+
+def open_gguf_reader(path: str | Path) -> _ReaderSurface:
+    from gguf import GGUFReader
+
+    try:
+        return cast("_ReaderSurface", GGUFReader(str(path)))
+    except ValueError as e:
+        if "is not a valid GGMLQuantizationType" in str(e):
+            return cast("_ReaderSurface", _GGUFFallbackReader(str(path)))
+        raise _GGUFLoadError(
+            error_type="invalid_gguf",
+            message=f"Failed to read GGUF file: {e}",
+            recoverable=False,
+        ) from e
+    except Exception as e:
+        raise _GGUFLoadError(
+            error_type="invalid_gguf",
+            message=f"Failed to read GGUF file: {e}",
+            recoverable=False,
+        ) from e
 
 
 def _read_metadata_string(field: object) -> str:
@@ -223,8 +488,6 @@ def load_gguf_config(gguf_path: Path) -> _GGUFModelConfig:
           hidden_size > 0 on success.
     Dependencies: Requires gguf package. Reads file at gguf_path.
     """
-    from gguf import GGUFReader
-
     if not gguf_path.exists():
         raise _GGUFLoadError(
             error_type="file_not_found",
@@ -232,14 +495,7 @@ def load_gguf_config(gguf_path: Path) -> _GGUFModelConfig:
             recoverable=True,
         )
 
-    try:
-        reader = GGUFReader(str(gguf_path))
-    except Exception as e:
-        raise _GGUFLoadError(
-            error_type="invalid_gguf",
-            message=f"Failed to read GGUF file: {e}",
-            recoverable=False,
-        ) from e
+    reader = open_gguf_reader(str(gguf_path))
 
     arch = _read_metadata_string(reader.fields.get("general.architecture"))
 
@@ -357,14 +613,12 @@ def extract_expert_weight_from_gguf(
         - Output tensor is on the requested device.
     Dependencies: Requires gguf and torch packages. Reads file at gguf_path.
     """
-    from gguf import GGUFReader
-
     if not gguf_path.exists():
         return None
 
     try:
-        reader = GGUFReader(str(gguf_path))
-    except Exception:
+        reader = open_gguf_reader(str(gguf_path))
+    except _GGUFLoadError:
         return None
 
     for tensor in reader.tensors:
@@ -560,18 +814,16 @@ def extract_gguf_weight_sample(
     Output (not found / error): None.
     Invariants:
         - Output is 2-D float32 on CPU.
-        - Rows are block-aligned for quantized tensors.
+        - Sampled rows are whole rows; block alignment is a property of the column axis.
         - Same (gguf_path, tensor_name, max_rows, seed) → same rows.
     Dependencies: Requires gguf and torch. Reads file at gguf_path.
     """
-    from gguf import GGUFReader
-
     if not Path(gguf_path).exists():
         return None
 
     try:
-        reader = GGUFReader(str(gguf_path))
-    except Exception:
+        reader = open_gguf_reader(str(gguf_path))
+    except _GGUFLoadError:
         return None
 
     target = None
@@ -643,10 +895,7 @@ def extract_gguf_weight_sample(
         return None
 
     rng = np.random.default_rng(seed)
-    if block_size > 1:
-        candidates = np.arange(0, n_rows, block_size, dtype=np.int64)
-    else:
-        candidates = np.arange(n_rows, dtype=np.int64)
+    candidates = np.arange(n_rows, dtype=np.int64)
 
     n_take = min(int(max_rows), int(candidates.shape[0]))
     if n_take <= 0:

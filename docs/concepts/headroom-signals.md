@@ -66,14 +66,25 @@ capture-proxy).
 
 **Scope:** Universal (requires weight tensors).
 
-**What it measures:** SVD-based spectral entropy of weight matrices — how much of
-the full rank is actually used. Computes `rank_ratio` (≤1.0, never exceeds 1.0)
-and `pct_ratio` (percentage of full rank, unbounded as cap shrinks). `scoring.py`
-returns `percentage_of_full_rank` for R-03.
+**What it measures:** SVD-based spectral entropy of the tile's weight matrix —
+how much of the tile's own rank ceiling is actually used. The result field is
+`percentage_of_full_rank` = `exp(spectral_entropy) / singular_values_count`, with
+`singular_values_count = min(tile_rows, tile_cols)` (`models/types.py:195`,
+`signals/effective_rank.py:110-114`).
 
-**Data source:** `--weight-pairs-file weights.json` (weight pairs with `gradient`,
-`weight`, `layer_name`). Can also be produced by the capture-proxy headroom sidecar
-from a checkpoint.
+The percentage is TILE-relative, never parent-level fidelity. `coverage` and
+`parent_shape` carry the tile-vs-parent relation
+(`signals/effective_rank.py:116-119`), and the human report prints both — tile
+rank/tile ceiling with percentage, plus parent ceiling and coverage beside it.
+A high tile percentage inside a low-coverage parent is expected, not a
+contradiction: a 40-row tile of a rank-40 parent reads 80.6%; of a rank-5120
+parent, 99.97%. Do not present the percentage as parent-level fidelity.
+
+**Data source:** `--weight-pairs-file` (a JSON file of weight/gradient pairs
+carrying `gradient`, `weight`, and `layer_name` — `load_weight_pairs_from_json`,
+`models/loader.py:353-357`; `models/types.py:79-87`) AND, since the GGUF path
+landed, `--model-path` with a `.gguf` file producing `weight_samples` (weights
+only — never presented as gradient data).
 
 **Sidecar key:** `effective_rank` — the only signal key emitted by the MVP sidecar.
 Weight tensors come from the checkpoint via safetensors.

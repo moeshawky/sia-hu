@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any, Literal
 
 import pytest
@@ -76,6 +77,10 @@ class TestDetectArchitecture:
             "model_headroom.models.gguf_loader.load_gguf_config",
             lambda _p: FakeConfig(),
         )
+        monkeypatch.setattr(
+            "model_headroom.models.gguf_loader.open_gguf_reader",
+            lambda _p: SimpleNamespace(tensors=[]),
+        )
         assert detect_architecture(str(gguf_path)) == "moe"
 
     def test_gguf_dense(self, tmp_path: Any, monkeypatch: MonkeyPatch) -> None:
@@ -92,6 +97,10 @@ class TestDetectArchitecture:
         monkeypatch.setattr(
             "model_headroom.models.gguf_loader.load_gguf_config",
             lambda _p: FakeConfig(),
+        )
+        monkeypatch.setattr(
+            "model_headroom.models.gguf_loader.open_gguf_reader",
+            lambda _p: SimpleNamespace(tensors=[]),
         )
         assert detect_architecture(str(gguf_path)) == "dense"
 

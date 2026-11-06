@@ -41,6 +41,10 @@ from model_headroom.refusal.report import (
 )
 
 
+class _ModelPathError(Exception):
+    pass
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse refusal-direction arguments."""
     parser = argparse.ArgumentParser(
@@ -211,11 +215,34 @@ def _load_offline(
     return (harmful, harmless)
 
 
+def _is_filesystem_shaped(model_path: str) -> bool:
+    return (
+        model_path.startswith("/")
+        or model_path.startswith("./")
+        or model_path.startswith("../")
+        or model_path.startswith("~")
+    )
+
+
 def _load_live(
     args: argparse.Namespace,
 ) -> tuple[list[ResidualBatch], list[ResidualBatch]] | None:
     if not (args.model_path and args.harmful_prompts and args.harmless_prompts):
         return None
+    path = Path(args.model_path)
+    if path.is_file():
+        raise _ModelPathError(
+            "--model-path expects a HuggingFace model directory, got a file: "
+            f"{path}. transformers cannot load GGUF checkpoints for live capture; "
+            "use --harmful-activations/--harmless-activations with pre-captured "
+            "residuals, or --sglang-url with --enable-return-hidden-states."
+        )
+    if path.is_dir() and not (path / "config.json").is_file():
+        raise _ModelPathError(
+            f"--model-path has no config.json; not a HuggingFace checkpoint directory: {path}"
+        )
+    if not path.exists() and _is_filesystem_shaped(args.model_path):
+        raise _ModelPathError(f"--model-path does not exist: {path}")
     harmful_prompts = load_prompts(args.harmful_prompts)
     harmless_prompts = load_prompts(args.harmless_prompts)
     if harmful_prompts is None or harmless_prompts is None:
@@ -400,7 +427,11 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         report = recover_direction_from_weight_deltas(deltas, spec)
     else:
-        loaded = _load_offline(args) or _load_live(args)
+        try:
+            loaded = _load_offline(args) or _load_live(args)
+        except _ModelPathError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
         if loaded is None:
             print(
                 "Error: provide one acquisition path — "

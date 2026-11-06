@@ -15,6 +15,7 @@ Model Headroom Analyzer — 7 core signals + 2 opt-in gradient diagnostics for t
 - **Coverage**: 95% (above 80% threshold), all modules ≥80%
 - **Functional surface**: CLI entry (19 args), orchestrator, scoring, 7 signals, 2 diagnostic signals, model loader (HF+GGUF), 2 reporters, architecture detection, classifier naming support (BERT/DeBERTa/ModernBERT/laya/RockAndEgg), provenance-aware scoring, coverage metrics, gradient diagnostics
 - **Known issues**: None blocking. DeBERTa naming unverified (P6 UNKNOWN — scoped out, requires separate verification when model available). All TEST_PROTOCOL.md issues addressed by existing tests.
+- **Dead surface (2026-11-06 audit)**: `read_log_scales` and `extract_expert_weight_from_gguf` in `models/gguf_loader.py` have no production caller — only tests. Kept deliberately: both are accurate primitives, unlike the consumer-less `ARCHITECTURE_TENSOR_NAMES` table removed in the same audit. Remove only when a phase needs the space or a real caller appears.
 
 ## Completed Phases
 

@@ -107,7 +107,7 @@ class TestHumanReportModuleFamilySummary:
         assert "2/10" in output
         assert "attention" in output
         assert "0/5" in output
-        assert "worst rank" in output
+        assert "worst tile rank" in output
         assert "45.0%" in output
         assert "layer_3" in output
 

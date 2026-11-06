@@ -13,7 +13,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from model_headroom.models.gguf_loader import extract_gguf_weight_sample
+from model_headroom.models.gguf_loader import (
+    extract_gguf_weight_sample,
+    open_gguf_reader,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -43,12 +46,7 @@ def sample_weight_for_effective_rank(
         Tensors that cannot be located or dequantized are skipped.
     Dependencies: Requires gguf and torch. Reads file at gguf_path.
     """
-    from gguf import GGUFReader
-
-    try:
-        reader = GGUFReader(str(gguf_path))
-    except Exception:
-        return []
+    reader = open_gguf_reader(str(gguf_path))
 
     # Collect shapes for all requested tensors in a single pass over the reader.
     shapes: dict[str, tuple[int, int]] = {}

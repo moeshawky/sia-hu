@@ -35,14 +35,13 @@ metadata (gguf_loader.py:246-250) and defaults dense architectures to
 | Family | Members | Code evidence | Why unverified |
 |--------|---------|---------------|----------------|
 | MoE | qwen3_moe, qwen3_5_moe, qwen2_moe, mixtral, olmoe, phimoe | `num_experts >= 2` → `family="moe"` (loader.py:160); MoE tensor-name templates in loader.py:52 (`qwen3_moe`, `qwen3_5_moe`, `qwen3_5_text`, `qwen2_moe`, `olmoe`); capture-proxy `MOE_MODEL_TYPES` set (names.py:34-36) | SIA-DIAGNOSTIC-CONTRACT.md:43: "❌ Not tested end-to-end"; SIA-RELEASE-DECISION.md:29: MoE not in the verified set; requires `--activations` + `--expert-weights-file` which no carrier routing source currently produces (SIA-DIAGNOSTIC-CONTRACT.md:43) |
-| GGUF MoE | mixtral (GGUF), qwen3_5_moe (GGUF) | `ARCHITECTURE_TENSOR_NAMES` registers mixtral, qwen2moe, qwen2_moe, phimoe, qwen3moe, qwen3_5_moe (gguf_loader.py:35-65); `load_gguf_config` reads `expert_count` (gguf_loader.py:246-250) | SIA-RELEASE-DECISION.md:115: "qwen35 registration committed but no real qwen35 GGUF model available for validation"; P1-3 requires "a real qwen35 GGUF model (operator to provide)" (SIA-RELEASE-DECISION.md:119) |
+| GGUF MoE | mixtral (GGUF), qwen3_5_moe (GGUF) | `extract_expert_weight_from_gguf` extracts a single tensor by literal name only; no architecture→tensor-name resolution exists — the `ARCHITECTURE_TENSOR_NAMES` table was removed as dead, unconsumed code (gguf_loader.py) | Not supported end-to-end; no real GGUF MoE model tested (SIA-RELEASE-DECISION.md:115-121) |
 
 ## GGUF status
 
 | Item | Value | Evidence |
 |------|-------|----------|
 | Format detected | `.gguf` suffix | loader.py:64-65 |
-| `qwen35` registered in `ARCHITECTURE_TENSOR_NAMES` | Yes | gguf_loader.py:71-75 |
 | `qwen35` in `_DENSE_ARCHITECTURES` | Yes | gguf_loader.py:81 |
 | Dense default `expert_count = 1` for `qwen35` | Yes | gguf_loader.py:247-248 |
 | Real GGUF model tested | **No** | SIA-DIAGNOSTIC-CONTRACT.md:44: "❌ Not tested (gguf extra not installed)"; SIA-RELEASE-DECISION.md:115-121: no real qwen35 GGUF available for validation |
@@ -76,8 +75,7 @@ Does the matrix overclaim anything?
 | `unknown` fallback | loader.py:231-241 |
 | MoE tensor-name templates (HF) | loader.py:52 |
 | `get_module_family` BERT/deberta support | loader.py:84-89 |
-| `ARCHITECTURE_TENSOR_NAMES` (GGUF) | gguf_loader.py:35-76 |
-| `qwen35` entry | gguf_loader.py:71-75 |
+| `qwen35` entry | removed (was gguf_loader.py:71-75) |
 | `_DENSE_ARCHITECTURES` | gguf_loader.py:81 |
 | dense default `expert_count = 1` | gguf_loader.py:247-248 |
 | `load_gguf_config` expert_count read | gguf_loader.py:246-250 |

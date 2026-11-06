@@ -10,13 +10,14 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from huggingface_hub import hf_hub_download
 
 from model_headroom.analysis.orchestrator import run_analysis
 from model_headroom.analysis.scoring import decision_grade_gaps
 from model_headroom.download import download_dataset_files, resolve_data_dir
+from model_headroom.models.types import SamplingMode, WeightSample
 from model_headroom.reporting.human_report import generate_human_report
 from model_headroom.reporting.json_report import generate_json_report
 
@@ -169,6 +170,75 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _gguf_weight_samples(
+    model_path: str, sampling_mode: str, max_rows: int | None
+) -> list[WeightSample] | None:
+    path = Path(model_path)
+    if not path.is_file() or path.suffix.lower() != ".gguf":
+        return None
+    try:
+        from model_headroom.models.gguf_loader import load_gguf_config
+        from model_headroom.models.ternary_sampling import (
+            sample_weight_for_effective_rank,
+        )
+    except ImportError:
+        print(
+            f"warning: cannot sample GGUF weights from {model_path}: "
+            "install the [gguf] extra",
+            file=sys.stderr,
+        )
+        return None
+    try:
+        config = load_gguf_config(path)
+    except Exception as e:
+        print(
+            f"warning: cannot sample GGUF weights from {model_path}: {e}",
+            file=sys.stderr,
+        )
+        return None
+    block_count = config.block_count
+    layers = sorted({0, block_count // 2, block_count - 1})
+    layers = [i for i in layers if 0 <= i < block_count]
+    rows = max_rows if isinstance(max_rows, int) and max_rows > 0 else 256
+    selected: list[tuple[str, Any, tuple[int, int]]] | None = None
+    for proj in ("ffn_gate", "ffn_up", "ffn_down"):
+        tensor_names = [f"blk.{i}.{proj}.weight" for i in layers]
+        try:
+            selected = sample_weight_for_effective_rank(
+                model_path, tensor_names, max_rows=rows
+            )
+        except Exception as e:
+            print(
+                f"warning: cannot sample GGUF weights from {model_path}: {e}",
+                file=sys.stderr,
+            )
+            return None
+        if selected:
+            break
+    if not selected:
+        print(
+            f"warning: no GGUF weight samples for {model_path}: "
+            "tried ffn_gate, ffn_up, ffn_down",
+            file=sys.stderr,
+        )
+        return None
+    samples: list[WeightSample] = []
+    for layer_name, tensor, parent_shape in selected:
+        samples.append(
+            WeightSample(
+                weight=tensor,
+                layer_name=layer_name,
+                parent_shape=parent_shape,
+                truncated=(tensor.shape[0] < parent_shape[0]),
+                sampling_mode=cast(
+                    "SamplingMode",
+                    "single_tile" if sampling_mode == "unknown" else sampling_mode,
+                ),
+            )
+        )
+    return samples
+
+
 def main(argv: list[str] | None = None) -> int:
     # Maps the model type flag to None when auto-detection is selected; otherwise forwards the explicit model type to run_analysis.
     """Drives the Model Headroom analysis pipeline: loads model data from provided paths, runs the analysis signals, checks decision-grade requirements if applicable, and generates terminal or JSON reports. Returns exit code (0 success, 1 error, 2 decision-grade not met)."""
@@ -299,6 +369,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
+    weight_samples = None
+    if args.model_path and not args.weight_pairs_file:
+        weight_samples = _gguf_weight_samples(
+            args.model_path, args.sampling_mode, args.rank_sample_count
+        )
+
     if args.mlp_activations_file:
         from model_headroom.models.loader import load_mlp_activations_from_json
 
@@ -356,6 +432,13 @@ def main(argv: list[str] | None = None) -> int:
             if args.weight_pairs_source_type == "measured"
             else "unverified",
         )
+    elif weight_samples and gradient_provenance is None:
+        from model_headroom.models.types import GradientProvenance
+
+        gradient_provenance = GradientProvenance(
+            source_type="fixture",
+            verification_status="unverified",
+        )
 
     if (
         args.weight_pairs_file
@@ -403,6 +486,7 @@ def main(argv: list[str] | None = None) -> int:
             effective_rank_sampling_mode=args.sampling_mode,
             effective_rank_sample_count=args.rank_sample_count,
             effective_rank_parent_shapes=parent_shapes,
+            weight_samples=weight_samples,
             compute_gradient_diagnostics=args.gradient_diagnostics,
         )
     except Exception as e:

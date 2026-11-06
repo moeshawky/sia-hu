@@ -607,8 +607,8 @@ def main(args: list[str] | None = None) -> int:
         parsed.backend, "CAPTURE_BACKEND", config, _DEFAULT_BACKEND
     )
     port = int(_resolve_setting(parsed.port, "CAPTURE_PORT", config, _DEFAULT_PORT))
-    if not (1 <= port <= 65535):
-        print(f"error: port {port} is out of range (1-65535)", file=sys.stderr)
+    if not (0 <= port <= 65535):
+        print(f"error: port {port} is out of range (0-65535)", file=sys.stderr)
         return 2
     host = _resolve_setting(parsed.host, "CAPTURE_HOST", config, _DEFAULT_HOST)
     headroom = _resolve_setting(parsed.headroom, "CAPTURE_HEADROOM", config, "off")

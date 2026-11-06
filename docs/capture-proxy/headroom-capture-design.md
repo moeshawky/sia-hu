@@ -156,3 +156,7 @@ extracts the existing `{timestamp}-{turn_id}.jsonl` naming so ref and writer agr
   (needs vLLM forward hooks or a training pipe — proposal §4.4 marks these future).
 - No pending-task drain at shutdown (no drain machinery exists in the codebase;
   capture-tool process-exit semantics acceptable).
+- No GGUF support: `capture-proxy` is safetensors-only and never imports a GGUF
+  reader. A `.gguf` `runtime_settings["model_path"]` is detected by suffix before
+  the directory gate, yields no sidecar (`record.headroom` stays None), and logs
+  one deduplicated warning naming the path — GGUF is an explicit non-goal.

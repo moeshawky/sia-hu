@@ -51,6 +51,20 @@ def _format_signal_status(signal: Any) -> str:
         cov_str = f" cov={cov:.1%}" if isinstance(cov, float) else ""
         mode = getattr(data, "sampling_mode", "unknown")
         mode_str = f" {mode}" if mode != "unknown" else samp_str
+        parent = getattr(data, "parent_shape", None)
+        tile_ceiling = getattr(data, "singular_values_count", 0)
+        if (
+            parent is not None
+            and isinstance(cov, float)
+            and cov < 1.0
+            and tile_ceiling > 0
+        ):
+            parent_ceiling = min(parent)
+            return (
+                f"  {name:<30} rank={data.rank:.1f}/{tile_ceiling} tile "
+                f"({data.percentage_of_full_rank:.1%}), parent ceiling "
+                f"{parent_ceiling}{mode_str}{cov_str}{prov}"
+            )
         return f"  {name:<30} rank={data.rank:.1f} ({data.percentage_of_full_rank:.1%}){mode_str}{cov_str}{prov}"
 
     if signal.signal_name == "grad_weight_ratio":
@@ -258,7 +272,7 @@ def generate_human_report(report: HeadroomReport) -> str:
         if isinstance(rank_fams, dict):
             for fam, entry in rank_fams.items():
                 lines.append(
-                    f"  {fam:<20} worst rank "
+                    f"  {fam:<20} worst tile rank "
                     f"{entry.get('min_percentage_of_full_rank', 0):.1%} "
                     f"({entry.get('worst_layer', 'n/a')})"
                 )

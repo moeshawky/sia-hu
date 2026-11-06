@@ -68,6 +68,89 @@ class TestFormatSignalStatusEdge:
         output = _format_signal_status(signal)
         assert "rank=6.0" in output
 
+    def test_effective_rank_sampled_names_both_ceilings(self) -> None:
+        signal = SignalResult(
+            signal_name="effective_rank",
+            status="computed",
+            data=EffectiveRankResult(
+                rank=39.9,
+                entropy=2.0,
+                percentage_of_full_rank=0.997,
+                singular_values_count=40,
+                coverage=0.008,
+                parent_shape=(5120, 17408),
+                signal_status="computed",
+            ),
+            duration_seconds=0.0,
+        )
+        output = _format_signal_status(signal)
+        assert "40" in output
+        assert "5120" in output
+        assert "99.7%" in output
+        assert "parent ceiling" in output
+        assert "tile" in output
+
+    def test_effective_rank_full_matrix_unchanged(self) -> None:
+        signal = SignalResult(
+            signal_name="effective_rank",
+            status="computed",
+            data=EffectiveRankResult(
+                rank=5120.0,
+                entropy=2.0,
+                percentage_of_full_rank=0.997,
+                singular_values_count=5120,
+                coverage=1.0,
+                parent_shape=None,
+                signal_status="computed",
+            ),
+            duration_seconds=0.0,
+        )
+        output = _format_signal_status(signal)
+        assert "parent ceiling" not in output
+        assert "(99.7%)" in output
+
+    def test_human_report_family_says_worst_tile_rank(self) -> None:
+        report = HeadroomReport(
+            model_name="m",
+            model_path="/tmp",
+            timestamp="2026-01-01T00:00:00+00:00",
+            signals=[],
+            overall_headroom_score=0.5,
+            recommendations=[],
+            metadata={
+                "module_family_summary": {
+                    "effective_rank": {
+                        "ffn": {
+                            "min_percentage_of_full_rank": 0.5,
+                            "worst_layer": "layers.0",
+                        }
+                    }
+                }
+            },
+        )
+        output = generate_human_report(report)
+        assert "worst tile rank" in output
+        assert "worst rank" not in output
+
+    def test_effective_rank_degenerate_no_ceiling_labels(self) -> None:
+        signal = SignalResult(
+            signal_name="effective_rank",
+            status="computed",
+            data=EffectiveRankResult(
+                rank=0.0,
+                entropy=0.0,
+                percentage_of_full_rank=0.0,
+                singular_values_count=0,
+                coverage=0.008,
+                parent_shape=(5120, 17408),
+                signal_status="degenerate",
+            ),
+            duration_seconds=0.0,
+        )
+        output = _format_signal_status(signal)
+        assert "parent ceiling" not in output
+        assert "rank=0.0" in output
+
     def test_grad_weight_ratio_formatting(self) -> None:
         signal = SignalResult(
             signal_name="grad_weight_ratio",

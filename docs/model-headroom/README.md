@@ -106,6 +106,12 @@ Architecture subtype detection identifies `hybrid_linear_attention` (mixed full/
 
 `--model-path` accepts a HuggingFace directory (with `config.json`) or a `.gguf` file. Format is auto-detected from the path (`models/loader.py:_detect_model_format`); GGUF configs are read via `models/gguf_loader.py` (requires the `gguf` extra). Weights are extracted to CPU RAM by design (NFR-01).
 
+### GGUF scope and limits
+
+Supported: dense and hybrid-attention GGUF; legacy Prism ternary Q2_0 via the ternary dequant adapters (`models/gguf_loader.py:634-635`, `:705-706`); config from KV metadata (`load_gguf_config`, `models/loader.py:141`); family from `expert_count` (`models/loader.py:142`); subtype/attention/vision/MTP flags derived from the tensor-name table with `detection_source="gguf_tensor_names"` (`models/loader.py:135-173`).
+
+Not supported: MoE expert extraction end-to-end — there is no architecture→tensor-name resolution; `extract_expert_weight_from_gguf` (`models/gguf_loader.py:595`) is a single-tensor reader keyed by literal tensor name. Headroom sidecar capture from a `.gguf` — safetensors-only, one warning, skipped by design (`src/capture_proxy/app.py:2384`, `:2421`). GGUF weight samples default to provenance `fixture`, which yields 0% measured coverage by construction; `--weight-pairs-source-type measured` opts in (`src/model_headroom/cli.py:426-441`). Sampling: `--rank-sample-count` sets the tile rows (default `None`, `cli.py:118`); samples come from layers `0`, `block_count//2`, `block_count-1` across `ffn_gate`/`ffn_up`/`ffn_down` (`cli.py:200-205`); the printed rank percentage is tile-relative and the parent ceiling + coverage are printed beside it.
+
 ## Scoring
 
 Composite score is a weighted average over applicable signals (`analysis/scoring.py:compute_headroom_score`). Fixed weights: loss_saturation 0.20, growth_factor 0.20, effective_rank 0.15, grad_weight_ratio 0.15, dead_neurons / load_balance / specialization 0.10 each. Skipped signals score 0.5 (neutral), errors score 0.0, `not_applicable` signals are excluded from numerator and denominator.
@@ -118,6 +124,28 @@ The measured score (`compute_coverage_metrics`) separates verified-measured sign
 - `json`: full `HeadroomReport` including per-signal `source_type`/`verification_status`/`sampling_mode`, `analysis_mode`, `decision_grade`, and flattened coverage fields (`measurement_coverage`, `headroom_score_measured`, `score_lower_bound`, `score_upper_bound`).
 
 Use `--output-file` to write to a file instead of stdout. `python -m model_headroom` works identically to the `model-headroom` entry point.
+
+## Refusal direction analysis
+
+Entry point `model-headroom-refusal` (`src/model_headroom/refusal/cli.py:48`).
+
+Live capture: `--model-path` must be a HuggingFace directory containing
+`config.json`, or a Hub id. A file path — including a `.gguf` — is rejected
+before `AutoTokenizer` is constructed (`refusal/cli.py:_ModelPathError`,
+`_is_filesystem_shaped`, lines 44 and 218), exit 1, because transformers cannot
+load GGUF checkpoints (`refusal/cli.py:233-239`, `:253`). A directory without
+`config.json` is rejected (`refusal/cli.py:240-243`); a nonexistent
+filesystem-shaped path is rejected (`refusal/cli.py:244-245`); a Hub id is
+passed through for transformers to resolve.
+
+Alternatives named by the guard: `--harmful-activations`/`--harmless-activations`
+with pre-captured residuals, or `--sglang-url` with `--enable-return-hidden-states`
+(`refusal/cli.py:236-238`, `:388-414`).
+
+Prompt files are newline-delimited `.txt` (exactly one prompt per physical line),
+`.json`, or `.jsonl` (`refusal/activations.py:load_prompts`, lines 79-120).
+`scripts/fetch_refusal_prompts.py` builds both sets with the standard library
+only (AdvBench CSV + the HF datasets-server rows API).
 
 ## Further Docs
 

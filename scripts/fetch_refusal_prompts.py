@@ -20,7 +20,9 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import json
 import os
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -38,7 +40,7 @@ def fetch_harmful(n: int) -> list[str]:
     reader = csv.DictReader(io.StringIO(text))
     prompts: list[str] = []
     for row in reader:
-        goal = (row.get("goal") or "").strip()
+        goal = " ".join((row.get("goal") or "").split())
         if goal:
             prompts.append(goal)
         if len(prompts) >= n:
@@ -47,14 +49,28 @@ def fetch_harmful(n: int) -> list[str]:
 
 
 def fetch_harmless(n: int) -> list[str]:
-    from datasets import load_dataset
-
-    ds = load_dataset(HARMLESS_DATASET, split=f"{HARMLESS_SPLIT}[:{n}]")
     prompts: list[str] = []
-    for row in ds:
-        text = (row.get("text") or "").strip()
-        if text:
-            prompts.append(text)
+    offset = 0
+    page_size = 100
+    dataset = urllib.parse.quote(HARMLESS_DATASET, safe="")
+    while len(prompts) < n:
+        url = (
+            "https://datasets-server.huggingface.co/rows"
+            f"?dataset={dataset}&config=default&split={HARMLESS_SPLIT}"
+            f"&offset={offset}&length={page_size}"
+        )
+        with urllib.request.urlopen(url) as resp:  # noqa: S310
+            payload = json.loads(resp.read().decode("utf-8"))
+        rows = payload.get("rows", []) or []
+        if not rows:
+            break
+        for row in rows:
+            text = " ".join((row.get("row", {}).get("text") or "").split())
+            if text:
+                prompts.append(text)
+                if len(prompts) >= n:
+                    break
+        offset += page_size
     return prompts
 
 

@@ -127,24 +127,49 @@ def detect_architecture_details(model_path: str) -> ArchitectureDetails:
     """Detect detailed model type properties from config files. Returns ArchitectureDetails
     with family (moe/dense/unknown), subtype, attention type flags, vision tower flag,
     MTP flag, and detection source. Checks num_local_experts/num_experts for MoE
-    detection, layer_types for attention type, weight map for vision and MTP markers.
+    detection, layer_types for attention type, weight map for vision and MTP markers,
+    and the GGUF tensor name table for GGUF files (header only, no dequantization).
     Catches all exceptions and returns unknown on failure."""
     try:
         fmt = _detect_model_format(model_path)
         if fmt == "gguf":
-            from model_headroom.models.gguf_loader import load_gguf_config
+            from model_headroom.models.gguf_loader import (
+                load_gguf_config,
+                open_gguf_reader,
+            )
 
             config = load_gguf_config(Path(model_path))
             has_moe = config.expert_count >= 2
+            reader = open_gguf_reader(Path(model_path))
+            names = [t.name for t in reader.tensors]
+            lowered = [n.lower() for n in names]
+            has_linear = any(("ssm_" in n) or ("linear_attn" in n) for n in lowered)
+            has_full = any(
+                ("attn_q." in n)
+                or ("attn_k." in n)
+                or ("attn_v." in n)
+                or ("attn_output" in n)
+                or ("self_attn" in n)
+                for n in lowered
+            )
+            has_vision = any(
+                ("visual" in n) or ("vision" in n) or ("patch_embed" in n)
+                for n in lowered
+            )
+            has_mtp = any(("mtp" in n) or ("nextn" in n) for n in lowered)
             return ArchitectureDetails(
                 family="moe" if has_moe else "dense",
-                subtype="dense_standard",
+                subtype=(
+                    "hybrid_linear_attention"
+                    if (has_linear or has_full)
+                    else "dense_standard"
+                ),
                 has_moe=has_moe,
-                has_full_attention=False,
-                has_linear_attention=False,
-                has_vision_tower=False,
-                has_mtp=False,
-                detection_source="gguf_config",
+                has_full_attention=has_full,
+                has_linear_attention=has_linear,
+                has_vision_tower=has_vision,
+                has_mtp=has_mtp,
+                detection_source="gguf_tensor_names",
             )
 
         config_path = Path(model_path) / "config.json"

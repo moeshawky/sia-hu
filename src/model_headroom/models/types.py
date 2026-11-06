@@ -88,6 +88,15 @@ class GradientWeightPair:
 
 
 @dataclass(frozen=True)
+class WeightSample:
+    weight: torch.Tensor
+    layer_name: str
+    parent_shape: tuple[int, int] | None = None
+    truncated: bool | None = None
+    sampling_mode: SamplingMode | None = None
+
+
+@dataclass(frozen=True)
 class MLPActivations:
     """Frozen dataclass holding activations, layer_name."""
 

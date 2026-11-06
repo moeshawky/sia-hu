@@ -207,8 +207,11 @@ The proxy serves as an observability and routing layer between agent workloads a
       `models/gguf_loader.py`, but its `gguf` extra (`pyproject.toml:25-26`) is **not installed** here —
       `import gguf` fails; `pip install -e "/kaggle/working/model_headroom[gguf]"` fixes it.
       `capture-proxy` is **safetensors-only**, so the sidecar cannot extract weights from a GGUF path.
-      Not a blocker — the weight-side headroom runs in Mode A from the HF directory, and the
-      inference-time signals come from telemetry, not weight reads.
+      **GGUF is an explicit NON-GOAL for the headroom sidecar:** the carrier reads the `.gguf`
+      suffix before the directory gate and logs one deduplicated `warning` naming the path,
+      then returns with `record.headroom` still None — no sidecar, no silent inertness,
+      no GGUF reader in the carrier. Not a blocker — the weight-side headroom runs in Mode A
+      from the HF directory, and the inference-time signals come from telemetry, not weight reads.
 - [ ] **`model_headroom` lags on name resolution, not detection.** Its `_get_expert_weight_name`
       (`models/loader.py:30-44`) is the same brittle `model_type` name-list shape, and for
       `model_type: "emo"` it returns a Mixtral-style name that does not exist in EMO. Its
