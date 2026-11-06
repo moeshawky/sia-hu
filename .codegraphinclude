@@ -1,14 +1,42 @@
+# .codegraphinclude — ! means EXCLUDE (reverse of gitignore re-inclusion)
+#
+# Admits every sia-hu subsystem so the graph targets all source, tests,
+# config, scripts, tools, and the dependency manifests they reference.
+# Bare files are intentionally NOT listed: a bare positive file makes its
+# parent (the project root) a scan root and silently widens ix coverage.
+# See ../codegraph-ferrari/docs/INDEX_SCOPE.md.
+
 # === SOURCE CODE ===
 src/
+capture-proxy/
+model_headroom/
+scripts/
+tools/
 
-# === TESTS ===
-capture-proxy/tests/
-model_headroom/tests/
+# === EXCLUSIONS (apply within scan roots) ===
+# Build/runtime artifacts
+!__pycache__/**
+!.venv/**
+!.codegraph/**
+!.ix/**
+!node_modules/**
+!target/**
+!build/**
+!dist/**
 
-# === CONFIG & DOCS ===
-pyproject.toml
-README.md
-docs/
+# Test caches
+!.pytest_cache/**
+!.mypy_cache/**
+!.ruff_cache/**
+!htmlcov/**
 
-# === CodeGraph self-reference ===
-.codegraphinclude
+# Non-source text
+!*.md
+!*.log
+!*.toml
+!*.yaml
+!*.yml
+
+# VCS / editor
+!.git/**
+!.sniper/**
