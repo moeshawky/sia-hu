@@ -46,6 +46,7 @@ Thumbs.db
 .codegraph/codegraph.db
 .codegraph/codegraph.db-shm
 .codegraph/codegraph.db-wal
+/reasoning.db
 .codegraph/cache/
 .codegraph/community_cache.json
 .codegraph/ct_cache.db

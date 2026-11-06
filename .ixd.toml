@@ -1,21 +1,30 @@
 # .ixd.toml — ix daemon / CLI index scope for sia-hu (unified)
 #
-# Canonical flat schema. Coarse scoping only; admission is governed by
-# .codegraphinclude. See ../codegraph-ferrari/docs/INDEX_SCOPE.md.
+# Canonical flat schema (ix >= 0.14). Coarse scoping only; admission is governed
+# by .codegraphinclude. See ../codegraph-ferrari/docs/INDEX_SCOPE.md.
+#
+# watch_roots lists directories to index (relative to this file's directory);
+# ix discovers the root plus one level deep via Path::starts_with. Roots must
+# stay congruent with the positive roots in .codegraphinclude so the ix search
+# surface never diverges from what codegraph admits.
 
 watch_roots = [
     "src",
     "capture-proxy",
     "model_headroom",
+    "scripts",
+    "tools",
 ]
 
+# DIRECTORY NAMES, exact match — not globs, no trailing slashes.
+# lost+found / .git / .ix / .codegraph are hardcoded in ix and need not be
+# listed here. Every other default relied upon must be explicit because an
+# existing file yields an empty list via #[serde(default)].
 exclude_patterns = [
-    ".git",
-    ".ix",
-    ".codegraph",
     "__pycache__",
     ".venv",
-    "venv",
+    ".codegraph",
+    ".ix",
     "node_modules",
     "target",
     "build",
@@ -24,9 +33,6 @@ exclude_patterns = [
     ".mypy_cache",
     ".ruff_cache",
     "htmlcov",
-    ".pi",
-    ".opencode",
-    ".githooks",
 ]
 
-debounce_ms = 200
+debounce_ms = 500
