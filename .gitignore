@@ -1,0 +1,76 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.so
+*.egg
+dist/
+build/
+
+# === Virtual environments ===
+.venv/
+venv/
+ENV/
+.env
+.env.*
+
+# === Tooling caches ===
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.uv-cache/
+
+# === IDE / OS ===
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# === Secrets ===
+*.pem
+*.key
+
+# === Tool artifacts (repo-wide) ===
+.ix/
+.imodent/
+.sniper/
+.githooks/
+
+# === CodeGraph (dev-only) ===
+.codegraph/
+.codegraph/codegraph.db
+.codegraph/codegraph.db-shm
+.codegraph/codegraph.db-wal
+.codegraph/cache/
+.codegraph/community_cache.json
+.codegraph/ct_cache.db
+.codegraph/ct_cache.db-shm
+.codegraph/ct_cache.db-wal
+.codegraph/ct_scan.lock
+.codegraph/knowledge.sled/
+.codegraph/neighborhoods.json
+.codegraph/neighborhoods.json.meta.json
+.codegraph/.lock*
+.codegraph/repo_registry.json
+.codegraph/semantic_summaries.json
+.codegraph/sled_cache.json
+.codegraph/sled_patterns.json
+.codegraph/sled_patterns.json.meta.json
+
+# === Agentic artifacts (alpha — not published) ===
+AGENTS.md
+.annotations/
+.maat/
+.maintenance/
+thoughts.jsonl
+.mcp.json
+.opencode/
+failed_reason.txt
+
+# === Logs ===
+*.log

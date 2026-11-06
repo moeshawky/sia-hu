@@ -1,0 +1,14 @@
+# === SOURCE CODE ===
+src/
+
+# === TESTS ===
+capture-proxy/tests/
+model_headroom/tests/
+
+# === CONFIG & DOCS ===
+pyproject.toml
+README.md
+docs/
+
+# === CodeGraph self-reference ===
+.codegraphinclude

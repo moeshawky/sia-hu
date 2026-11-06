@@ -1,0 +1,32 @@
+# .ixd.toml — ix daemon / CLI index scope for sia-hu (unified)
+#
+# Canonical flat schema. Coarse scoping only; admission is governed by
+# .codegraphinclude. See ../codegraph-ferrari/docs/INDEX_SCOPE.md.
+
+watch_roots = [
+    "src",
+    "capture-proxy",
+    "model_headroom",
+]
+
+exclude_patterns = [
+    ".git",
+    ".ix",
+    ".codegraph",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "node_modules",
+    "target",
+    "build",
+    "dist",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "htmlcov",
+    ".pi",
+    ".opencode",
+    ".githooks",
+]
+
+debounce_ms = 200

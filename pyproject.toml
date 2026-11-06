@@ -1,0 +1,87 @@
+[build-system]
+requires = ["hatchling>=1.33"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sia-hu"
+version = "0.2.0"
+description = "Unified headroom measurement: capture-proxy carrier + model_headroom scoring authority"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Moe Shawky" }]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.162",
+    "uvicorn>=0.54",
+    "httpx>=0.28.1",
+    "pydantic>=2.14.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.2",
+    "pytest-asyncio>=1.4.1.post1",
+    "pytest-cov>=7.1",
+    "mypy>=2.4.1",
+    "ruff>=0.17.4",
+    "pre-commit>=4.7",
+]
+headroom = [
+    "torch>=2.15",
+    "numpy>=2.5.4",
+    "safetensors>=0.8.0",
+    "huggingface_hub>=2.4",
+    "transformers>=5.22.1",
+    "accelerate>=1.15",
+]
+gguf = [
+    "gguf>=0.19",
+]
+
+[project.scripts]
+capture-proxy = "capture_proxy.__main__:main"
+model-headroom = "model_headroom.cli:main"
+model-headroom-refusal = "model_headroom.refusal.cli:main"
+sia = "sia.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/capture_proxy", "src/model_headroom", "src/sia"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+extend-exclude = [".pi", "tools"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "S", "C4", "RET", "TC", "FA"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"capture-proxy/tests/*" = ["S101", "S104", "S603"]
+"model_headroom/tests/**/*.py" = ["S101", "S108", "S603"]
+"__init__.py" = ["F401"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+warn_return_any = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = "accelerate"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "gguf"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["capture-proxy/tests", "model_headroom/tests"]
+pythonpath = ["src"]
+addopts = "-v --tb=short"
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["capture_proxy", "model_headroom"]
+omit = ["*/tests/*", "*/conftest.py"]

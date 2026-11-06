@@ -1,0 +1,10 @@
+# capture-proxy configuration
+# Created by `capture-proxy --ensure-config`. Edit freely: the flag only
+# writes this file when it is ABSENT, so local edits are never overwritten.
+# Precedence: CLI flag > env var (CAPTURE_*) > this file > built-in default.
+
+upstream_url = "http://127.0.0.1:8080"
+port = 8000
+host = "127.0.0.1"
+base_path = "/root/captures"
+backend = "llamacpp"   # auto | llamacpp | ollama | node-llama-cpp | vllm | sglang
