@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from typing import Any
 
 import numpy as np
@@ -8,6 +9,11 @@ import torch
 
 from model_headroom.models.gguf_loader import _GGUFLoadError
 from model_headroom.models.ternary_sampling import sample_weight_for_effective_rank
+
+_GGUF_AVAILABLE = importlib.util.find_spec("gguf") is not None
+requires_gguf = pytest.mark.skipif(
+    not _GGUF_AVAILABLE, reason="gguf extra not installed"
+)
 
 
 def _create_gguf_file(
@@ -42,6 +48,7 @@ def _create_gguf_file(
     return gguf_path
 
 
+@requires_gguf
 class TestSampleWeightForEffectiveRank:
     def test_success(self, tmp_path: Any) -> None:
         shape = [64, 128]

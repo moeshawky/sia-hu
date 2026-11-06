@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.util
+
 import numpy as np
 import pytest
 
@@ -11,6 +13,11 @@ from model_headroom.models.ternary_quants import (
     TQ2_0Adapter,
     dequantize_ternary,
     prism_quant_size,
+)
+
+_GGUF_AVAILABLE = importlib.util.find_spec("gguf") is not None
+requires_gguf = pytest.mark.skipif(
+    not _GGUF_AVAILABLE, reason="gguf extra not installed"
 )
 
 
@@ -95,6 +102,7 @@ class TestPTQ1_0Adapter:
 
 
 class TestDequantizeTernaryDispatch:
+    @requires_gguf
     def test_q2_0(self) -> None:
         scale = np.array([0x00, 0x3C], dtype=np.uint8)
         qs = np.array([0x56] + [0x55] * 15, dtype=np.uint8)
@@ -111,12 +119,14 @@ class TestDequantizeTernaryDispatch:
         assert result.shape == (1, 128)
         assert result[0, 0] == pytest.approx(1.0)
 
+    @requires_gguf
     def test_tq1_0(self) -> None:
         block = np.zeros((1, 54), dtype=np.uint8)
         result = dequantize_ternary(block, "TQ1_0")
         assert result.shape == (1, 256)
         assert np.all(result == 0.0)
 
+    @requires_gguf
     def test_tq2_0(self) -> None:
         qs = np.full(64, 0x55, dtype=np.uint8)
         d = np.array([0x00, 0x3C], dtype=np.uint8)
@@ -159,6 +169,7 @@ class TestDequantizeTernaryDispatch:
 
 
 class TestMultiBlock:
+    @requires_gguf
     def test_q2_0_multiple_blocks(self) -> None:
         scale = np.array([0x00, 0x3C], dtype=np.uint8)
         qs = np.array([0x55] * 16, dtype=np.uint8)
