@@ -16,6 +16,7 @@ from huggingface_hub import hf_hub_download
 
 from model_headroom.analysis.orchestrator import run_analysis
 from model_headroom.analysis.scoring import decision_grade_gaps
+from model_headroom.device import resolve_device
 from model_headroom.download import download_dataset_files, resolve_data_dir
 from model_headroom.models.types import SamplingMode, WeightSample
 from model_headroom.reporting.human_report import generate_human_report
@@ -158,6 +159,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Compute optional gradient diagnostics (effective rank, coherence, module families)",
     )
     parser.add_argument(
+        "--device",
+        choices=["auto", "cuda", "cpu"],
+        default="auto",
+        help="Device for tensor computation: auto uses the first available "
+        "accelerator (cuda preferred), else cpu (default: auto)",
+    )
+    parser.add_argument(
         "--output-format",
         choices=["json", "human"],
         default="human",
@@ -170,8 +178,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _data_file_error(kind: str, path: str, flag: str, fmt: str, cause: str) -> str:
+    """Build an instructive data-file error carrying the cause, the offending
+    path, the flag to pass, and where to find a valid example."""
+    return (
+        f"Error loading {kind} from {path}: {cause}. "
+        f"Use {flag} to provide a {fmt} file; "
+        f"see src/model_headroom/download.py for the expected JSON format."
+    )
+
+
 def _gguf_weight_samples(
-    model_path: str, sampling_mode: str, max_rows: int | None
+    model_path: str, sampling_mode: str, max_rows: int | None, device: str
 ) -> list[WeightSample] | None:
     path = Path(model_path)
     if not path.is_file() or path.suffix.lower() != ".gguf":
@@ -205,7 +223,7 @@ def _gguf_weight_samples(
         tensor_names = [f"blk.{i}.{proj}.weight" for i in layers]
         try:
             selected = sample_weight_for_effective_rank(
-                model_path, tensor_names, max_rows=rows
+                model_path, tensor_names, max_rows=rows, device=device
             )
         except Exception as e:
             print(
@@ -243,6 +261,15 @@ def main(argv: list[str] | None = None) -> int:
     # Maps the model type flag to None when auto-detection is selected; otherwise forwards the explicit model type to run_analysis.
     """Drives the Model Headroom analysis pipeline: loads model data from provided paths, runs the analysis signals, checks decision-grade requirements if applicable, and generates terminal or JSON reports. Returns exit code (0 success, 1 error, 2 decision-grade not met)."""
     args = parse_args(argv)
+
+    device = resolve_device(args.device)
+    if device is None:
+        print(
+            f"Error: --device {args.device} requested but no {args.device} "
+            "device is available",
+            file=sys.stderr,
+        )
+        return 1
 
     temp_config_dir: Path | None = None
 
@@ -343,59 +370,86 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     if args.activations:
-        from model_headroom.models.loader import load_activations_from_json
+        from model_headroom.models.loader import load_activations_diagnostic
 
-        activation_data = load_activations_from_json(args.activations)
-        if activation_data is None:
-            print(f"Error loading activations from {args.activations}", file=sys.stderr)
+        outcome = load_activations_diagnostic(args.activations)
+        if outcome.error is not None:
+            print(
+                _data_file_error(
+                    "activations",
+                    args.activations,
+                    "--activations",
+                    "expert_activations JSON",
+                    outcome.error,
+                ),
+                file=sys.stderr,
+            )
             return 1
+        activation_data = outcome.data
 
     weight_pairs = None
     mlp_activations = None
     expert_weight_sets = None
 
     if args.weight_pairs_file:
-        from model_headroom.models.loader import load_weight_pairs_from_json
+        from model_headroom.models.loader import load_weight_pairs_diagnostic
 
-        try:
-            weight_pairs = load_weight_pairs_from_json(args.weight_pairs_file)
-        except ValueError as e:
-            print(f"Error loading weight pairs: {e}", file=sys.stderr)
-            return 1
-        if weight_pairs is None:
+        outcome = load_weight_pairs_diagnostic(args.weight_pairs_file)
+        if outcome.error is not None:
             print(
-                f"Error loading weight pairs from {args.weight_pairs_file}",
+                _data_file_error(
+                    "weight pairs",
+                    args.weight_pairs_file,
+                    "--weight-pairs-file",
+                    "weight_pairs JSON",
+                    outcome.error,
+                ),
                 file=sys.stderr,
             )
             return 1
+        weight_pairs = outcome.data
 
     weight_samples = None
     if args.model_path and not args.weight_pairs_file:
         weight_samples = _gguf_weight_samples(
-            args.model_path, args.sampling_mode, args.rank_sample_count
+            args.model_path, args.sampling_mode, args.rank_sample_count, device
         )
 
     if args.mlp_activations_file:
-        from model_headroom.models.loader import load_mlp_activations_from_json
+        from model_headroom.models.loader import load_mlp_activations_diagnostic
 
-        mlp_activations = load_mlp_activations_from_json(args.mlp_activations_file)
-        if mlp_activations is None:
+        outcome = load_mlp_activations_diagnostic(args.mlp_activations_file)
+        if outcome.error is not None:
             print(
-                f"Error loading MLP activations from {args.mlp_activations_file}",
+                _data_file_error(
+                    "MLP activations",
+                    args.mlp_activations_file,
+                    "--mlp-activations-file",
+                    "mlp_activations JSON",
+                    outcome.error,
+                ),
                 file=sys.stderr,
             )
             return 1
+        mlp_activations = outcome.data
 
     if args.expert_weights_file:
-        from model_headroom.models.loader import load_expert_weights_from_json
+        from model_headroom.models.loader import load_expert_weights_diagnostic
 
-        expert_weight_sets = load_expert_weights_from_json(args.expert_weights_file)
-        if expert_weight_sets is None:
+        outcome = load_expert_weights_diagnostic(args.expert_weights_file)
+        if outcome.error is not None:
             print(
-                f"Error loading expert weights from {args.expert_weights_file}",
+                _data_file_error(
+                    "expert weights",
+                    args.expert_weights_file,
+                    "--expert-weights-file",
+                    "expert_weights JSON",
+                    outcome.error,
+                ),
                 file=sys.stderr,
             )
             return 1
+        expert_weight_sets = outcome.data
 
     parent_shapes: dict[str, tuple[int, int]] | None = None
     if args.rank_parent_shapes:
@@ -409,20 +463,22 @@ def main(argv: list[str] | None = None) -> int:
 
     gradient_provenance = None
     if args.gradient_provenance_file:
-        from model_headroom.models.loader import load_gradient_provenance_from_json
+        from model_headroom.models.loader import load_gradient_provenance_diagnostic
 
-        gradient_provenance = load_gradient_provenance_from_json(
-            args.gradient_provenance_file
-        )
-        if gradient_provenance is None:
+        outcome = load_gradient_provenance_diagnostic(args.gradient_provenance_file)
+        if outcome.error is not None:
             print(
-                "Error loading gradient provenance from "
-                f"{args.gradient_provenance_file}: expected canonical "
-                'nested format {"provenance": {...}} with valid '
-                "source_type/verification_status values",
+                _data_file_error(
+                    "gradient provenance",
+                    args.gradient_provenance_file,
+                    "--gradient-provenance-file",
+                    "gradient provenance JSON",
+                    outcome.error,
+                ),
                 file=sys.stderr,
             )
             return 1
+        gradient_provenance = outcome.data
     elif args.weight_pairs_source_type:
         from model_headroom.models.types import GradientProvenance
 
@@ -488,6 +544,7 @@ def main(argv: list[str] | None = None) -> int:
             effective_rank_parent_shapes=parent_shapes,
             weight_samples=weight_samples,
             compute_gradient_diagnostics=args.gradient_diagnostics,
+            device=device,
         )
     except Exception as e:
         print(f"Analysis failed: {e}", file=sys.stderr)

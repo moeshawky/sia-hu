@@ -18,7 +18,9 @@ Provides: HeadroomWriter, HeadroomLogger, TensorBundle, TensorLoader,
 Invariants:
   - off mode: no files written, no torch/safetensors import (no writer built)
   - write_async never raises; returns None when nothing was written
-  - device="cpu" only (NFR-01) — tensors never touch TPU/GPU memory
+  - device="cpu" — tensors are read from safetensors shards into host memory and
+    serialized to JSON; GPU residency buys nothing because the payload leaves
+    the process as JSON anyway
   - weight-pair files keep the model_headroom loader contract: every pair
     carries gradient, weight, and layer_name (zero-gradient arrays when no
     training hook exists), plus parent_shape, truncated, and sampling_mode on
@@ -766,7 +768,9 @@ def _default_tensor_loader(
     """Load one weight tensor (dequantized to float32) plus a zero gradient.
 
     Reads the shard holding tensor_name via safetensors.torch.safe_open with
-    framework="pt" and device="cpu" (NFR-01). When a matching
+    framework="pt" and device="cpu". CPU is the correct device here because the
+    tensor is serialized to JSON (a host-memory format): moving it to GPU only
+    to copy it back is a net loss. When a matching
     weight_scale_inv side tensor exists (fp8 checkpoints), the weight is
     dequantized by elementwise multiplication before the float32 cast.
     The gradient is a zero array of the weight's shape: the model_headroom
@@ -814,7 +818,9 @@ class HeadroomWriter:
 
     Invariants:
       - write_async never raises; returns None when nothing was written
-      - device="cpu" only (NFR-01) — no TPU/GPU memory touched
+      - device="cpu" — the tensor payload is serialized to JSON, a host-memory
+        format; GPU residency buys nothing because the payload leaves the process
+        as JSON anyway
       - the float32 payload is bounded by max_bytes (0 = unlimited);
         over-cap tensors are row-truncated and flagged truncated=True
       - interval N samples 1 of N eligible captures (0 or 1 = every call)

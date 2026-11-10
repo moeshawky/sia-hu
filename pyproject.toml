@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sia-hu"
-version = "0.2.0"
+version = "0.4.0"
 description = "Unified headroom measurement: capture-proxy carrier + model_headroom scoring authority"
 readme = "README.md"
 license = "MIT"
@@ -25,6 +25,16 @@ dev = [
     "mypy>=2.4.1",
     "ruff>=0.17.4",
     "pre-commit>=4.7",
+]
+# Environment shim, not a project dependency: the Kaggle base image installs
+# /etc/python3.X/sitecustomize.py that does a top-level `import wrapt`. A uv
+# venv excludes system dist-packages, so every interpreter startup in the venv
+# prints `Error in sitecustomize ... No module named 'wrapt'` to stderr.
+# Declaring wrapt in this dev extra makes `uv sync --extra dev` self-healing
+# on any machine. Kept OUT of [project].dependencies: sia-hu never imports
+# wrapt, and a published wheel must not ship a bogus runtime dependency.
+env = [
+    "wrapt>=1.16",
 ]
 headroom = [
     "torch>=2.15",
@@ -64,6 +74,7 @@ ignore = ["E501"]
 [tool.ruff.lint.per-file-ignores]
 "capture-proxy/tests/*" = ["S101", "S104", "S603"]
 "model_headroom/tests/**/*.py" = ["S101", "S108", "S603"]
+"tests/*" = ["S101", "S603", "S108"]
 "__init__.py" = ["F401"]
 
 [tool.mypy]
@@ -82,11 +93,11 @@ module = "gguf"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["capture-proxy/tests", "model_headroom/tests"]
+testpaths = ["capture-proxy/tests", "model_headroom/tests", "tests"]
 pythonpath = ["src"]
 addopts = "-v --tb=short"
 asyncio_mode = "auto"
 
 [tool.coverage.run]
-source = ["capture_proxy", "model_headroom"]
+source = ["capture_proxy", "model_headroom", "sia"]
 omit = ["*/tests/*", "*/conftest.py"]

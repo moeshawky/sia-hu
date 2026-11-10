@@ -14,6 +14,7 @@ from model_headroom.analysis.scoring import (
     decision_grade_gaps,
     generate_recommendations,
 )
+from model_headroom.device import default_device
 from model_headroom.models.loader import (
     detect_architecture,
     detect_architecture_details,
@@ -127,11 +128,26 @@ def _run_signal(
     try:
         data = func(*args, **kwargs)
         duration = time.monotonic() - start
-        if hasattr(data, "signal_status") and data.signal_status in (
-            "error",
-            "single_expert",
-            "expert_count_unknown",
+        # List results (e.g. grad_weight_ratio) carry per-element statuses. If
+        # no element is scoreable, the whole signal is not computed.
+        if (
+            isinstance(data, list)
+            and data
+            and all(hasattr(item, "signal_status") for item in data)
+            and all(item.signal_status != "computed" for item in data)
         ):
+            statuses = {item.signal_status for item in data}
+            overall_status: Any = statuses.pop() if len(statuses) == 1 else "error"
+            return SignalResult(
+                signal_name=name,
+                status=overall_status,
+                data=data,
+                duration_seconds=duration,
+            )
+        # Promote every non-computed payload status generically so a signal
+        # that returns insufficient_data / degenerate / error / etc. is never
+        # laundered into "computed".
+        if hasattr(data, "signal_status") and data.signal_status != "computed":
             return SignalResult(
                 signal_name=name,
                 status=data.signal_status,
@@ -177,6 +193,7 @@ def run_analysis(
     weight_pairs_verification_status: VerificationStatus | None = None,
     compute_gradient_diagnostics: bool = False,
     weight_samples: list[Any] | None = None,
+    device: str | None = None,
 ) -> HeadroomReport:
     """Execute all applicable headroom signals and produce a composite report.
     Resolves model type (auto-detect or override), dispatches 7 signal functions
@@ -188,11 +205,13 @@ def run_analysis(
     signals: list[SignalResult] = []
 
     resolved_architecture = architecture or detect_architecture(model_path)
+    resolved_device = device if device is not None else default_device()
     details = detect_architecture_details(model_path)
     resolved_mode: AnalysisMode = analysis_mode or "diagnostic"
     report_metadata: dict[str, Any] = {
         **(metadata or {}),
         "architecture": resolved_architecture,
+        "device": resolved_device,
         "architecture_details": {
             "family": details.family,
             "subtype": details.subtype,
@@ -222,16 +241,16 @@ def run_analysis(
         weight_pairs_source_type = gradient_provenance.source_type
         weight_pairs_verification_status = gradient_provenance.verification_status
 
-    eff_source: SourceType = weight_pairs_source_type or "measured"
-    eff_verif: VerificationStatus = weight_pairs_verification_status or "verified"
-    grad_source: SourceType = weight_pairs_source_type or "measured"
-    grad_verif: VerificationStatus = weight_pairs_verification_status or "verified"
+    eff_source: SourceType = weight_pairs_source_type or "unavailable"
+    eff_verif: VerificationStatus = weight_pairs_verification_status or "unavailable"
+    grad_source: SourceType = weight_pairs_source_type or "unavailable"
+    grad_verif: VerificationStatus = weight_pairs_verification_status or "unavailable"
     if gradient_provenance is not None:
         grad_source = gradient_provenance.source_type
         grad_verif = gradient_provenance.verification_status
 
-    mlp_src: SourceType = mlp_source_type or "measured"
-    mlp_ver: VerificationStatus = mlp_verification_status or "verified"
+    mlp_src: SourceType = mlp_source_type or "unavailable"
+    mlp_ver: VerificationStatus = mlp_verification_status or "unavailable"
 
     sampling_mode: SamplingMode = effective_rank_sampling_mode or "unknown"
 
@@ -307,6 +326,7 @@ def run_analysis(
                     pair_sampling,
                     parent_shape,
                     sample_count=effective_rank_sample_count,
+                    device=resolved_device,
                 )
             )
         if pair_provenance:
@@ -377,6 +397,7 @@ def run_analysis(
             "grad_weight_ratio",
             analyze_grad_weight_ratios,
             weight_pairs,
+            device=resolved_device,
         )
         signals.append(
             SignalResult(
@@ -421,9 +442,10 @@ def run_analysis(
                 f"dead_neurons_{act.layer_name}",
                 analyze_dead_neurons,
                 act,
-                1e-6,
-                False,
-                mlp_src,
+                threshold=1e-6,
+                return_indices=False,
+                source_type=mlp_src,
+                device=resolved_device,
             )
             total_duration += result.duration_seconds
             if result.status == "computed":
@@ -497,6 +519,7 @@ def run_analysis(
                 "specialization",
                 analyze_specialization,
                 ExpertWeights(expert_weights=[], layer_name="dense"),
+                device=resolved_device,
             )
         )
     elif expert_weight_sets:
@@ -508,6 +531,7 @@ def run_analysis(
                 f"specialization_{ew.layer_name}",
                 analyze_specialization,
                 ew,
+                device=resolved_device,
             )
             total_duration += result.duration_seconds
             if result.status == "computed":
@@ -565,7 +589,9 @@ def run_analysis(
             )
 
             sample_pairs = weight_pairs[:8]
-            rank_reports = analyze_gradient_effective_ranks_for_pairs(sample_pairs)
+            rank_reports = analyze_gradient_effective_ranks_for_pairs(
+                sample_pairs, device=resolved_device
+            )
             # Cross-batch contract: coherence is only meaningful across >=2
             # batches of the SAME layer/projection. Group pairs by layer name;
             # layers with a single batch yield no coherence (unavailable, never
@@ -577,7 +603,7 @@ def run_analysis(
             for layer_name, group in layer_groups.items():
                 if len(group) < 2:
                     continue
-                rep = compute_coherence_for_layer(group)
+                rep = compute_coherence_for_layer(group, device=resolved_device)
                 if rep.signal_status == "computed":
                     coherence_by_layer[layer_name] = {
                         "mean_cosine": rep.mean_cosine_similarity,
@@ -621,8 +647,8 @@ def run_analysis(
                 "coherence_note": coherence_note,
                 "module_families": list(family_groups.keys()),
             }
-        except Exception:  # noqa: S110
-            pass
+        except Exception as e:
+            report_metadata["gradient_diagnostics_error"] = str(e)
 
     report = HeadroomReport(
         model_name=model_name,

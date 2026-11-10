@@ -39,7 +39,7 @@ Settings resolve in order: **CLI flag > env var > config file > default.**
 
 ## model-headroom (authority)
 
-All 19 flags, declared in `src/model_headroom/cli.py:parse_args`:
+All 20 flags, declared in `src/model_headroom/cli.py:parse_args`:
 
 | Flag | Purpose |
 |------|---------|
@@ -60,6 +60,7 @@ All 19 flags, declared in `src/model_headroom/cli.py:parse_args`:
 | `--mlp-source-type` | MLP source type override |
 | `--analysis-mode` | Analysis mode (decision_grade requires ≥70% coverage) |
 | `--gradient-diagnostics` | Enable R-08/R-09 diagnostic signals |
+| `--device` | Device for tensor computation: auto (first available accelerator, cuda preferred, else cpu), cuda, or cpu (default: auto) |
 | `--output-format` | Output format (human/json) |
 | `--output-file` | Write output to file instead of stdout |
 
@@ -69,7 +70,7 @@ All 19 flags, declared in `src/model_headroom/cli.py:parse_args`:
 
 ## model-headroom-refusal (authority)
 
-Refusal analysis CLI. Entry point: `model-headroom-refusal = "model_headroom.refusal.cli:main"`. Same installation and invocation pattern as `model-headroom`. See `model_headroom/refusal/cli.py` for its flag set.
+Refusal analysis CLI. Entry point: `model-headroom-refusal = "model_headroom.refusal.cli:main"`. Same installation and invocation pattern as `model-headroom`. See `model_headroom/refusal/cli.py` for its flag set. `--device {auto,cuda,cpu}` (default: `auto`) picks the first available accelerator (cuda → xpu → mps → cpu) else CPU — an unflagged refusal run prefers an accelerator instead of silently capturing on CPU; `--device cuda` on a box without CUDA exits 1.
 
 ---
 

@@ -38,17 +38,13 @@ DEFAULT_SIGNAL_WEIGHTS: dict[str, float] = {
 _MIN_COVERAGE_FOR_DECISION_GRADE = 0.7
 
 
-def _score_signal(signal: SignalResult) -> float:
-    if signal.status == "not_applicable":
-        return 0.5
-    if signal.status == "single_expert":
-        return 0.5
-    if signal.status == "expert_count_unknown":
-        return 0.5
-    if signal.status == "skipped":
-        return 0.5
-    if signal.status == "error":
-        return 0.0
+def _score_signal(signal: SignalResult) -> float | None:
+    # Non-computed payloads carry no scoreable measurement: return the None
+    # sentinel so the caller retains the weight but contributes 0.0 to the
+    # numerator. not_applicable and single_expert are excluded from the
+    # denominator entirely by compute_headroom_score.
+    if signal.status != "computed":
+        return None
 
     data = signal.data
 
@@ -67,7 +63,7 @@ def _score_signal(signal: SignalResult) -> float:
     if signal.signal_name == "grad_weight_ratio":
         ratios = cast("list[GradWeightRatio]", data)
         if not ratios or len(ratios) == 0:
-            return 0.5
+            return None
         high_pressure_count = sum(1 for r in ratios if r.is_high_pressure)
         total = len(ratios)
         return 1.0 - (high_pressure_count / total)
@@ -98,13 +94,10 @@ def _has_sampling_confidence(signal: SignalResult) -> bool:
 
 
 def _is_measured(signal: SignalResult) -> bool:
-    if signal.status != "computed":
-        return False
-    if signal.source_type in ("synthetic", "fixture", "unknown"):
-        return False
-    if signal.source_type == "estimated" and not _has_sampling_confidence(signal):
-        return False
-    return signal.verification_status != "unverified"
+    # A signal is measured only when it was actually computed from measured
+    # source. verification_status does NOT gate measurement: an unverified but
+    # computed measured signal is still a measurement, just not decision-grade.
+    return signal.status == "computed" and signal.source_type == "measured"
 
 
 def compute_headroom_score(report: HeadroomReport) -> float:
@@ -120,11 +113,15 @@ def compute_headroom_score(report: HeadroomReport) -> float:
     weighted_sum = 0.0
 
     for signal in report.signals:
-        if signal.status == "not_applicable":
+        # not_applicable and single_expert are excluded from the denominator
+        # entirely (architecture cannot produce the measurement).
+        if signal.status in ("not_applicable", "single_expert"):
             continue
         weight = DEFAULT_SIGNAL_WEIGHTS.get(signal.signal_name, 0.1)
         score = _score_signal(signal)
-        weighted_sum += weight * score
+        if score is not None:
+            weighted_sum += weight * score
+        # Everything else non-computed (cat 3): 0.0 numerator, weight retained.
         total_weight += weight
 
     return weighted_sum / total_weight if total_weight > 0 else 0.0
@@ -156,12 +153,14 @@ def compute_coverage_metrics(report: HeadroomReport) -> CoverageMetrics:
     weighted_sum_measured = 0.0
 
     for signal in report.signals:
-        if signal.status == "not_applicable":
+        # not_applicable and single_expert are not applicable to this
+        # architecture; exclude them from the applicable-weight denominator.
+        if signal.status in ("not_applicable", "single_expert"):
             continue
         weight = DEFAULT_SIGNAL_WEIGHTS.get(signal.signal_name, 0.1)
         total_applicable_weight += weight
         if _is_measured(signal):
-            score = _score_signal(signal)
+            score = cast("float", _score_signal(signal))
             weighted_sum_measured += weight * score
             measured_weight += weight
 
@@ -300,7 +299,9 @@ def generate_recommendations(report: HeadroomReport) -> list[str]:
         if (
             signal.signal_name == "effective_rank"
             and data.percentage_of_full_rank < 0.3
-        ):
+        ):  # HEURISTIC: 0.3 threshold is uncalibrated; low tile-relative rank
+            # may reflect efficient representation, not spare capacity. See
+            # mission Phase 2: spectral occupancy != trainability.
             recommendations.append(
                 "Low effective rank suggests weight matrices are low-rank. "
                 "Consider pruning or low-rank adaptation."

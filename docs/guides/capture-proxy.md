@@ -15,7 +15,7 @@ Capture proxy for llama.cpp, ollama, node-llama-cpp, vLLM, and SGLang — logs r
 JSONL of all requests/responses before forwarding. Exposes an OpenAI-compatible API
 so any agent using OpenAI client libraries can route through it transparently.
 
-**Version:** 0.2.0 — the carrier half of sia-hu. Never scores; always emits.
+**Version:** 0.3.0 — the carrier half of sia-hu. Never scores; always emits.
 
 ---
 

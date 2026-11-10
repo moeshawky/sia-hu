@@ -2,7 +2,7 @@
 
 **Purpose:** Document the measured environment: hardware constraints, device
 policy, TPU absence, and known software limitations. Cross-references
-`concepts/frozen-contracts.md` (NFR-01 CPU-only weights), `operations/verify-chain.md`
+`concepts/frozen-contracts.md` (NFR-01 accelerator-preferred weights, CPU fallback), `operations/verify-chain.md`
 (verify chain per device), and `guides/model-headroom.md` (`--device` opt-in).
 No Python code changes are proposed here.
 
@@ -10,13 +10,18 @@ No Python code changes are proposed here.
 
 ## Device policy
 
-**CPU is the default.** Weights load to CPU RAM by design (NFR-01). The authority is
-an offline analysis tool — vLLM HBM and GPU memory are untouched.
+**Accelerator preferred, CPU as fallback.** Weights resolve through
+`src/model_headroom/device.py` — when a usable accelerator exists (CUDA today;
+XPU and MPS also detected), use it; CPU is used when no accelerator exists or
+when the operator explicitly requests `--device cpu`. Explicitly requesting an
+unavailable accelerator is an error, never a silent fallback. `--device auto`
+(default) resolves to the first available accelerator else `cpu`. The authority
+remains an offline analysis tool — it never proxies, never runs a server, and
+never loads weights into vLLM HBM or any GPU memory by default.
 
-An opt-in `--device` flag exists (Q4 decision in the plan) with an explicit memory
-budget, not auto-selection. A deliberately oversized tensor fails loudly, never
-silently OOMs into a wrong answer. GPU probe: same tensor on CPU and GPU gives the
-same R-03 within tolerance.
+An opt-in `--device` flag exists with auto/cuda/cpu choices. A deliberately
+oversized tensor fails loudly, never silently OOMs into a wrong answer. GPU
+probe: same tensor on CPU and GPU gives the same R-03 within tolerance.
 
 **TPU is absent on this box.** Verified four ways: no `/dev/accel*`, no `accel` in
 `/proc/devices`. TPU work is code-level guards + a portability test — explicitly
@@ -70,7 +75,7 @@ headroom (tight). int8 = 13.6 GB — fits. int4 = 6.8 GB — fits.
 
 ## Cross-references
 
-- `concepts/frozen-contracts.md` — NFR-01 CPU-only weights
+- `concepts/frozen-contracts.md` — NFR-01 accelerator-preferred weights, CPU fallback
 - `operations/verify-chain.md` — verify chain (mypy src/, not mypy .)
 - `guides/model-headroom.md` — `--device`, `--architecture` flags
 - `reference/env-vars.md` — env vars for device/backend selection

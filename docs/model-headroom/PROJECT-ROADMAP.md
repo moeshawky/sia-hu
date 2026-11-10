@@ -17,6 +17,90 @@ Model Headroom Analyzer — 7 core signals + 2 opt-in gradient diagnostics for t
 - **Known issues**: None blocking. DeBERTa naming unverified (P6 UNKNOWN — scoped out, requires separate verification when model available). All TEST_PROTOCOL.md issues addressed by existing tests. `dequantize_ternary` documents a Prism fallback, but `_gguf_dequantize` catches only `AttributeError`/`NotImplementedError`; with `gguf` absent the call raises `ModuleNotFoundError` instead of falling back (measured 2026-11-06, CI run 42260689947) — no-`gguf` test paths skip for 0.2.0, fallback semantics deferred.
 - **Dead surface (2026-11-06 audit)**: `read_log_scales` and `extract_expert_weight_from_gguf` in `models/gguf_loader.py` have no production caller — only tests. Kept deliberately: both are accurate primitives, unlike the consumer-less `ARCHITECTURE_TENSOR_NAMES` table removed in the same audit. Remove only when a phase needs the space or a real caller appears.
 
+## Observed Shortcomings — measured 2026-11-07 (end-to-end, ornith-1.5-9b)
+
+Measured on a served dense model (`ornith-1.5-9b`, `Qwen3_5ForConditionalGeneration`, 9.653 B) through
+`capture-proxy` → vLLM → `model-headroom --headroom-json`. Each item was reproduced against the emitted
+report, not read off a worker summary. **Line references are to `HEAD` (`da3e903`)** — the working tree
+carries uncommitted Phase 12 changes that shift them. Carrier-side items and the ranked remediation
+order live in `docs/maintenance/2026-11-07-seams/SEAMS.md`; they are cross-referenced here, not
+restated.
+
+### A-1 — `grad_weight_ratio` scores 1.0 from a zero gradient (BLOCKER)
+
+The signal returns `list[GradWeightRatio]`, not a report object. `_run_signal`
+(`analysis/orchestrator.py:130`, the `hasattr(data, "signal_status")` guard) promotes a signal's own
+status only when `data` carries a `signal_status` attribute; a list does not, so the per-ratio
+`no_gradient` label (`signals/grad_weight_ratio.py:71-81`) is discarded and the signal is stamped
+`computed`. `_score_signal` (`analysis/scoring.py:67-73`) then computes
+`1.0 - high_pressure_count / total`. A zero gradient yields `ratio=0.0`, `is_high_pressure=False`,
+so the score is exactly `1.0`.
+
+A zero gradient is the strongest possible evidence of *no training pressure*. The current rule
+converts it into the maximum headroom score — the sign of the evidence is inverted.
+
+Measured consequence on the 2026-11-07 run:
+
+| Quantity | Reported | Without the zero-gradient ratio |
+|---|---:|---:|
+| `overall_headroom_score` | 0.644211 | 0.550461 (ratio neutral 0.5) / 0.562106 (excluded) |
+| `headroom_score_measured` | 0.884563 | 0.769126 |
+| `measurement_coverage` | 0.375 | 0.1875 |
+
+Compounding cause: `analysis/orchestrator.py:225-228` defaults `eff_source` / `grad_source` to
+`measured` and `eff_verif` / `grad_verif` to `verified` when no provenance is supplied, and the
+`--headroom-json` path supplies none. A sidecar-derived pair with a zero gradient therefore enters both
+the composite **and** `measured_weight` (0.15 + 0.15 = 0.30 of 0.80). Fixing the score alone does not
+fix coverage; the provenance default must be addressed too.
+
+### A-2 — Provenance defaults are optimistic in one path and pessimistic in the other (BLOCKER)
+
+Two opposite defaults coexist:
+
+| Path | Default provenance | Effect |
+|---|---|---|
+| `--headroom-json` / unlabelled weight pairs | `measured` / `verified` (`orchestrator.py:225-228`) | unverified input counted as a real measurement |
+| GGUF weight samples (`cli.py:435-441`) | `fixture` / `unverified` | a real tensor read from a real `.gguf` excluded from coverage |
+
+The GGUF case is measured: a real-file run computed `effective_rank` and produced composite
+0.5906542007068689 with coverage 0.0 — a genuine measurement reported as a neutral prior. That is
+SEAMS.md R-3 / S-09. The `--headroom-json` case is the mirror image and is not yet in SEAMS.md.
+
+### A-3 — `effective_rank` accepted from a single truncated tensor (REQUIRED)
+
+Measured artifact: one pair only, `model.language_model.layers.0.mlp.gate_proj.weight`,
+`parent_shape [12288, 4096]`, emitted `4096 × 4096`, `truncated=true`, `sampling_mode=single_tile`,
+`coverage 0.3333`, `rank 3150.34`, `percentage_of_full_rank 0.7691257951509713`.
+
+The artifact is honest about being a tile, but the authority scores it as a model-level property with
+no penalty and no gate beyond the signal weight. Phase 6 asks for full-matrix rank with family
+stratification; until then the composite must not present a one-tensor top-left tile as the model's
+rank. The tensor read is also an **MLP gate**, not the attention projection the weight plan intended —
+carrier defect C-3 in the carrier roadmap.
+
+### A-4 — Dense scoring contract unresolved against the operator's rule (DECISION BLOCKED)
+
+Operator rule: *a dense model is just a MoE with 1 expert.* Current code emits `not_applicable` for
+`load_balance` and `specialization` on dense, and `compute_headroom_score` (`scoring.py:123-124`)
+skips them entirely, renormalizing over the remaining five (`total_applicable_weight = 0.80`). Under
+the operator's rule `load_balance` is *defined* for a single expert — one expert takes every token →
+`single_expert`, `balance_ratio=None` — so excluding it for dense while including it for MoE makes
+the two composites non-comparable.
+
+Arithmetic is recorded in SEAMS.md § *The dense = 1-expert-MoE rule*: Option A 0.80, Option B 0.90,
+B-variant 1.00. **Operator ruling required before any dense score is compared to a MoE score.** No
+code change is authorized until that ruling lands.
+
+### A-5 — Refusal-direction extraction cannot run against a served vLLM (UNVERIFIED AT SCALE)
+
+All three Phase 11 acquisition paths fail against a live vLLM 0.32.0 server: `SamplingParams` exposes
+no `output_hidden_states`; the sglang route needs `--enable-return-hidden-states`; the live
+`--model-path` route needs the GPU and RAM the server holds; `--weight-deltas` needs an
+already-abliterated checkpoint. A behavioural refusal probe was run instead (100 % refusal on
+AdvBench n=100, 0 % on `harmless_alpaca` n=100, 2/30 on a constructed borderline set), but
+**direction extraction on a production server remains UNKNOWN**. The Phase 11 caveat stands and now
+has a measured cause rather than an untested assumption.
+
 ## Completed Phases
 
 ### Phase 1: GGUF Test Environment Fix ✅ COMPLETED
@@ -92,10 +176,10 @@ Model Headroom Analyzer — 7 core signals + 2 opt-in gradient diagnostics for t
 
 ### Phase 12: GPU/CPU Device Selection (explicit operator request 2026-11-04)
 
-- **Goal**: Use GPU when an accelerator is available for GPU-eligible operations; keep CPU as fallback and default (NFR-01 preserved). Add `--device auto|cuda` opt-in to `model-headroom-refusal` CLI. Fix `_capture_hook` to not force CPU transfer mid-forward-pass. Add optional `device` param to GPU-eligible signals (effective_rank SVD, gradient_effective_rank SVD, gradient_coherence SVD). Restructure `specialization` to batched Gram GEMM before GPU enablement. Restructure `dead_neurons` to fuse reduction passes before GPU enablement. Keep CPU for `grad_weight_ratio` norms (transfer cost > compute saved), `load_balance` (pure Python), loss/growth signals (pure Python), JSON→tensor construction, reporting serialization.
-- **Success criterion**: `--device cuda` with `torch.cuda.is_available()==True` keeps activations on GPU through `_capture_hook` and executes SVD/norm/cosine on GPU tensors; `--device cpu` (default) unchanged from current behavior; all existing tests pass; scores bit-for-bit identical on CPU default.
+- **Goal**: Use GPU when an accelerator is available for GPU-eligible operations; CPU as fallback when no accelerator exists or `--device cpu` is requested. `--device {auto,cuda,cpu}` (default `auto`) is implemented in `src/model_headroom/cli.py:162-167` and resolved through `src/model_headroom/device.py` (`available_accelerators()`, `default_device()`, `resolve_device()`). Preference order: cuda, then xpu, then mps, else cpu. An explicit unavailable accelerator returns `None`, which the CLI turns into an error + exit 1, never a silent downgrade.
+- **Success criterion**: `--device cuda` with `torch.cuda.is_available()==True` executes tensor operations on GPU tensors; `--device cpu` forces CPU; `--device auto` (default) resolves to first available accelerator else cpu; all existing tests pass; scores bit-for-bit identical on CPU default.
 - **Scope**: Limited to device placement only. No signal result changes. No new signal categories. No refactoring unrelated to device.
-- **NFR-01**: Preserved — CPU remains the default. GPU is opt-in only.
+- **NFR-01**: Rewritten — accelerator preferred (cuda, then xpu, then mps), CPU as fallback. CPU is not "the default" when an accelerator exists; `auto` is the default. Explicitly requesting an unavailable accelerator is an error (exit 1).
 
 ### Phase 11: Refusal-Direction Extraction ✅ IMPLEMENTED
 - **Goal**: Compute a model-agnostic refusal direction on the fly from contrastive harmful/harmless prompt sets, without coupling to the headroom scoring pipeline
@@ -114,7 +198,7 @@ Model Headroom Analyzer — 7 core signals + 2 opt-in gradient diagnostics for t
 - Performance optimization was previously OUT of scope; expanded to IN scope for Phase 12 only by explicit operator request (GPU/CPU device selection). No other performance work is authorized.
 - Adding new phase requires explicit operator request OR gap discovered during audit
 - Measurement phases (6-10) are gated: each requires the preceding phase's evidence to be collected before proceeding
-- Phase 12 is gated: device placement changes must not alter signal results (bit-for-bit identical scores on CPU), must preserve NFR-01 CPU default, must add `--device auto|cuda` opt-in only
+- Phase 12 is gated: device placement changes must not alter signal results (bit-for-bit identical scores on CPU), must preserve NFR-01 (accelerator preferred, CPU fallback), must add `--device auto|cuda|cpu` (default auto).
 
 ## Controlled-Evolution Path
 - New signals require: operator request + coverage proof + adversarial test design

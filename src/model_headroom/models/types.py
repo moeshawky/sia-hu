@@ -12,10 +12,21 @@ if TYPE_CHECKING:
 ArchitectureType = Literal["moe", "dense", "unknown"]
 
 SourceType = Literal[
-    "measured", "synthetic", "fixture", "estimated", "imported", "unknown"
+    "measured",
+    "synthetic",
+    "fixture",
+    "estimated",
+    "imported",
+    "unknown",
+    "inferred",
+    "unavailable",
+    "invalid",
+    "not_applicable",
 ]
 
-VerificationStatus = Literal["verified", "provenance_incomplete", "unverified"]
+VerificationStatus = Literal[
+    "verified", "provenance_incomplete", "unverified", "unavailable"
+]
 
 SamplingMode = Literal[
     "full_matrix", "randomized_svd", "multi_tile", "single_tile", "external", "unknown"
@@ -212,7 +223,9 @@ class GradWeightRatio:
     is_high_pressure: bool
     z_score: float
     layer_name: str
-    signal_status: Literal["computed", "zero_weight", "no_gradient", "error"]
+    signal_status: Literal[
+        "computed", "zero_weight", "no_gradient", "invalid_evidence", "error"
+    ]
     error_message: str | None = None
 
 
@@ -297,12 +310,18 @@ class SignalResult:
         "single_expert",
         "expert_count_unknown",
         "error",
+        "insufficient_data",
+        "degenerate",
+        "poor_fit",
+        "zero_weight",
+        "no_gradient",
+        "invalid_evidence",
     ]
     data: Any
     duration_seconds: float
     error_message: str | None = None
-    source_type: SourceType = "measured"
-    verification_status: VerificationStatus = "verified"
+    source_type: SourceType = "unavailable"
+    verification_status: VerificationStatus = "unavailable"
     sampling_mode: SamplingMode | None = None
 
 

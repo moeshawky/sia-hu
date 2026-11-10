@@ -272,7 +272,7 @@ class CaptureProxyApp:
         )
         self._upstream_client = UpstreamClient(upstream_url=self._upstream_url)
 
-        self.app = FastAPI(title="capture-proxy", version="0.2.0")
+        self.app = FastAPI(title="capture-proxy", version="0.3.0")
         self._register_routes()
 
     @staticmethod

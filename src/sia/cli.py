@@ -1,8 +1,12 @@
-"""sia — thin aliasing layer forwarding to the three existing CLIs.
+"""sia — dispatch layer for capture-proxy, model-headroom, and sia-owned verbs.
 
 Pure dispatch: imports the existing mains lazily (so ``sia`` itself pulls in no
 heavy dependencies) and forwards all remaining args to the matching sub-main,
-propagating its exit code. Existing CLIs are never modified.
+propagating its exit code. Existing carrier/authority CLIs are never modified.
+
+``sia`` also owns two read-only/write-verified verbs implemented here:
+``doctor`` (workspace preflight) and ``publish`` (push + verify remote ref,
+never auto-commits).
 """
 
 from __future__ import annotations
@@ -24,6 +28,13 @@ _SUBCOMMANDS = (
         "model_headroom.refusal.cli",
         "main",
         "Run the model-headroom-refusal CLI.",
+    ),
+    ("doctor", "sia.doctor", "main", "Read-only workspace preflight."),
+    (
+        "publish",
+        "sia.publish",
+        "main",
+        "Push current branch; verify remote ref never auto-commits.",
     ),
 )
 
@@ -65,7 +76,7 @@ def main(args: list[str] | None = None) -> int:
     parser = _top_parser()
 
     # No subcommand, or explicit help: render the top-level help (which lists
-    # all three subcommands) and exit successfully. ``--help``/-h is handled
+    # all five subcommands) and exit successfully. ``--help``/-h is handled
     # here so it is never swallowed by the top parser and can instead be
     # forwarded to a sub-main (e.g. ``sia capture-proxy --help``).
     if not args:

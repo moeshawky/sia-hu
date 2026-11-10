@@ -13,16 +13,26 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 import numpy as np
 import torch
-from gguf.constants import (
-    GGUF_DEFAULT_ALIGNMENT,
-    GGUF_MAGIC,
-    GGMLQuantizationType,
-    GGUFValueType,
-)
+
+try:
+    from gguf.constants import (
+        GGUF_DEFAULT_ALIGNMENT,
+        GGUF_MAGIC,
+        GGMLQuantizationType,
+        GGUFValueType,
+    )
+
+    _GGUF_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised without [gguf] extra
+    GGUF_DEFAULT_ALIGNMENT = 32
+    GGUF_MAGIC = 0
+    GGMLQuantizationType = None  # type: ignore[assignment,misc]
+    GGUFValueType = None  # type: ignore[assignment,misc]
+    _GGUF_AVAILABLE = False
 
 from model_headroom.models.ternary_quants import (
     _PRISM_QUANT_SIZES,
@@ -129,18 +139,21 @@ class _FallbackField:
         return self._value
 
 
-_GGUF_SCALAR_TO_NP: dict[GGUFValueType, type[np.generic]] = {
-    GGUFValueType.UINT8: np.uint8,
-    GGUFValueType.INT8: np.int8,
-    GGUFValueType.UINT16: np.uint16,
-    GGUFValueType.INT16: np.int16,
-    GGUFValueType.UINT32: np.uint32,
-    GGUFValueType.INT32: np.int32,
-    GGUFValueType.UINT64: np.uint64,
-    GGUFValueType.INT64: np.int64,
-    GGUFValueType.FLOAT32: np.float32,
-    GGUFValueType.BOOL: np.bool_,
-}
+if _GGUF_AVAILABLE:
+    _GGUF_SCALAR_TO_NP: dict[Any, type[np.generic]] = {
+        GGUFValueType.UINT8: np.uint8,
+        GGUFValueType.INT8: np.int8,
+        GGUFValueType.UINT16: np.uint16,
+        GGUFValueType.INT16: np.int16,
+        GGUFValueType.UINT32: np.uint32,
+        GGUFValueType.INT32: np.int32,
+        GGUFValueType.UINT64: np.uint64,
+        GGUFValueType.INT64: np.int64,
+        GGUFValueType.FLOAT32: np.float32,
+        GGUFValueType.BOOL: np.bool_,
+    }
+else:
+    _GGUF_SCALAR_TO_NP = {}
 
 
 def _gguf_shape_from_dims(dims: np.ndarray) -> tuple[int, ...]:
@@ -782,7 +795,7 @@ def _dequantize_gguf_tensor(
             return None
         try:
             raw_data = gguf_dequantize(data, gguf_qtype)
-        except (NotImplementedError, ValueError, TypeError):
+        except (ImportError, NotImplementedError, ValueError, TypeError):
             return None
         copied = np.ascontiguousarray(raw_data).copy()
         result = torch.from_numpy(copied).float().to(device)
@@ -798,6 +811,7 @@ def extract_gguf_weight_sample(
     tensor_name: str,
     max_rows: int = 256,
     seed: int = 42,
+    device: str = "cpu",
 ) -> torch.Tensor | None:
     """Bounded deterministic row sampling of a single GGUF weight tensor.
 
@@ -884,7 +898,7 @@ def extract_gguf_weight_sample(
                 return None
             try:
                 flat = gguf_dequantize(data, gguf_qtype)
-            except (NotImplementedError, ValueError, TypeError):
+            except (ImportError, NotImplementedError, ValueError, TypeError):
                 return None
 
     copied = np.ascontiguousarray(flat).copy()
@@ -904,4 +918,4 @@ def extract_gguf_weight_sample(
     chosen = rng.choice(candidates, size=n_take, replace=False)
     chosen = np.sort(chosen)
     sample = weight[chosen]
-    return sample.float()
+    return sample.float().to(device)

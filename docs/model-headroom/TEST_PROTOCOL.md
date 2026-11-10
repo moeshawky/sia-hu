@@ -37,7 +37,7 @@
 | O-02 | `extract_expert_weights_for_layer` | Dead code — not called from anywhere. |
 | O-03 | Performance benchmarks | No baseline established. Not blocking correctness verification. |
 | O-04 | Cross-platform compatibility | Running on single Ubuntu 26.04. Not a deployment target. |
-| O-05 | Multi-GPU / distributed execution | Single L40S. CLI loads tensors to CPU RAM by design. |
+| O-05 | Multi-GPU / distributed execution | Single L40S. CLI resolves device through `device.py` — accelerator preferred, CPU fallback (NFR-01). |
 | O-06 | Security fuzzing | Local analysis tool. Input from trusted local files. |
 | O-07 | Concurrency / thread safety | CLI is single-threaded. No shared mutable state (frozen dataclasses). |
 

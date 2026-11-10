@@ -38,8 +38,9 @@ A logit lens that reads Sia before it becomes Hu is a 1-to-1 conceptual match:
 sia-hu/
   README.md                 → project overview
   PROJECT-ROADMAP.md        → unified `sia` CLI plan, phases 1-2
-  pyproject.toml            → single project, sia-hu 0.2.0
-  bootstrap.sh              → clone + verify + push gate
+  pyproject.toml            → single project, sia-hu 0.3.0
+  sia doctor                → read-only workspace preflight (no commit/push)
+  sia publish               → push current branch, verify remote ref, never auto-commit
   src/capture_proxy/        → carrier package (tests/ too)
   src/model_headroom/       → scoring authority package (tests/ too)
   capture-proxy/            → carrier tests, gate, roadmap (docs moved to docs/capture-proxy/)
@@ -58,7 +59,7 @@ Start here, then follow the section that matches your question:
 | The bidirectional contract, 2-D pair contract, reserved keys | `architecture/contract.md` |
 | What R-01 through R-09 signals measure (headroom signal reference) | `concepts/headroom-signals.md` |
 | source_type / verification_status, measured vs synthetic data | `concepts/provenance.md` |
-| Frozen dataclasses, invariants, NFR-01 (CPU-only weights) | `concepts/frozen-contracts.md` |
+| Frozen dataclasses, invariants, NFR-01 (accelerator-preferred weights) | `concepts/frozen-contracts.md` |
 | Install, bootstrap `--doctor`, verify chain | `guides/quickstart.md` |
 | Unified `sia` CLI — subcommands, forwarding, exit codes | `guides/sia-cli.md` |
 | Carrier usage: start proxy, route through it, capture paths | `guides/capture-proxy.md` |

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -138,7 +139,7 @@ def generate_refusal_json(report: RefusalDirectionReport) -> str:
                 "layer_index": s.layer_index,
                 "harmful_count": s.harmful_count,
                 "harmless_count": s.harmless_count,
-                "cohen_d": None if s.cohen_d != s.cohen_d else s.cohen_d,
+                "cohen_d": None if math.isnan(s.cohen_d) else s.cohen_d,
                 "mean_norm": s.mean_norm,
                 "masked_count": s.masked_count,
                 "direction_norm": s.direction_norm,

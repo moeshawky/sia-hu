@@ -54,7 +54,21 @@ def compute_effective_rank(
 
     full_rank = min(rows, cols)
 
-    if weight.abs().sum() == 0:
+    if not torch.isfinite(weight).all():
+        return EffectiveRankResult(
+            rank=1.0,
+            entropy=0.0,
+            percentage_of_full_rank=0.0,
+            singular_values_count=0,
+            signal_status="error",
+            error_message="Non-finite (NaN/Inf) values in weight matrix",
+            sampling_mode=sampling_mode,
+            coverage=coverage,
+            parent_shape=parent_shape,
+            sample_count=sample_count,
+        )
+
+    if weight.numel() == 0 or weight.abs().max() == 0:
         return EffectiveRankResult(
             rank=1.0,
             entropy=0.0,
@@ -68,7 +82,7 @@ def compute_effective_rank(
         )
 
     try:
-        weight = weight.to(device)
+        weight = weight.to(device).float()
         svd_result = torch.linalg.svd(weight, full_matrices=False)
         sv = svd_result[1]
     except Exception as e:

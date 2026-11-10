@@ -119,6 +119,7 @@ def analyze_gradient_effective_ranks(
     gradients: list[torch.Tensor],
     *,
     layer_names: list[str] | None = None,
+    device: str = "cpu",
 ) -> list[GradientEffectiveRankReport]:
     """Compute effective rank for each gradient tensor in a list. Returns a list of GradientEffectiveRankReport, one per gradient.
 
@@ -132,11 +133,12 @@ def analyze_gradient_effective_ranks(
             f"layer_names length ({len(layer_names)}) must match "
             f"gradients ({len(gradients)})"
         )
-    return [compute_gradient_effective_rank(g) for g in gradients]
+    return [compute_gradient_effective_rank(g, device=device) for g in gradients]
 
 
 def analyze_gradient_effective_ranks_for_pairs(
     pairs: list[GradientWeightPair],
+    device: str = "cpu",
 ) -> list[tuple[str, GradientEffectiveRankReport]]:
     """Compute effective rank per batch, attributed to its layer/projection.
 
@@ -144,4 +146,7 @@ def analyze_gradient_effective_ranks_for_pairs(
     its provenance — the same attribution semantics as R-08 coherence, which
     additionally requires all batches to share one layer name.
     """
-    return [(p.layer_name, compute_gradient_effective_rank(p.gradient)) for p in pairs]
+    return [
+        (p.layer_name, compute_gradient_effective_rank(p.gradient, device=device))
+        for p in pairs
+    ]

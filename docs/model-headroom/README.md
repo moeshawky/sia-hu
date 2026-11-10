@@ -13,7 +13,7 @@ pip install -e ".[headroom]"   # torch / numpy / safetensors
 pip install -e ".[dev,headroom,gguf]"   # everything
 ```
 
-Requires Python ≥3.12, `torch>=2.15`, `numpy>=2.5.4`. Package version 0.2.0.
+Requires Python ≥3.12, `torch>=2.15`, `numpy>=2.5.4`. Package version 0.3.0.
 `pip install -e .` alone installs the carrier-free base package; the heavy
 scoring deps live in the `headroom` extra, which is what keeps a carrier-only
 install from pulling torch. Entry points: `model-headroom`, `model-headroom-refusal`.
@@ -76,7 +76,7 @@ model-headroom --model-name NAME --model-path PATH \
 
 Exit codes: `0` success, `1` error (bad input, unreadable file, analysis failure), `2` decision-grade not met.
 
-All 19 flags are declared in `src/model_headroom/cli.py:parse_args` — the list above is grouped, not truncated.
+All 20 flags are declared in `src/model_headroom/cli.py:parse_args` — the list above is grouped, not truncated.
 
 ## Signals
 
@@ -104,7 +104,7 @@ Architecture subtype detection identifies `hybrid_linear_attention` (mixed full/
 
 ## Model Formats
 
-`--model-path` accepts a HuggingFace directory (with `config.json`) or a `.gguf` file. Format is auto-detected from the path (`models/loader.py:_detect_model_format`); GGUF configs are read via `models/gguf_loader.py` (requires the `gguf` extra). Weights are extracted to CPU RAM by design (NFR-01).
+`--model-path` accepts a HuggingFace directory (with `config.json`) or a `.gguf` file. Format is auto-detected from the path (`models/loader.py:_detect_model_format`); GGUF configs are read via `models/gguf_loader.py` (requires the `gguf` extra). Weights resolve through `src/model_headroom/device.py` — accelerator preferred, CPU as fallback (NFR-01).
 
 ### GGUF scope and limits
 
@@ -178,7 +178,7 @@ Measured by `ix` across the codebase:
 
 - **mypy strict = true** — no `Any` without justification
 - **21 frozen dataclasses** in `models/types.py` — all immutable
-- **Weights load to CPU RAM** — intentional VRAM constraint (NFR-01)
+- **Weights resolve through `device.py`** — accelerator preferred (cuda, then xpu, then mps), CPU as fallback (NFR-01).
 - **Skipped signals score 0.5** (neutral) in composite score; not_applicable signals are excluded entirely
 - **Provenance-aware scoring** — measured, synthetic, fixture, estimated, imported data classified and weighted separately
 - **Measured headroom score** separated from legacy composite with coverage and uncertainty bounds

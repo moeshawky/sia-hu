@@ -42,6 +42,7 @@ REQUIRED_FIELDS: tuple[str, ...] = (
     "request_body_sha256",
     "messages_sha256",
     "upstream_status",
+    "attempt_number",
 )
 
 #: Present on a v6 record, may be null. Null means NOT APPLICABLE to this

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import json
+from contextlib import redirect_stderr
 from typing import Any
 
 from model_headroom.cli import main
@@ -268,7 +270,7 @@ class TestCliGGUFWeightSamples:
             "model_headroom.models.ternary_sampling.sample_weight_for_effective_rank",
             fake_sampler,
         )
-        result = _gguf_weight_samples(str(tmp_path), "single_tile", None)
+        result = _gguf_weight_samples(str(tmp_path), "single_tile", None, "cpu")
         assert result is None
         assert called == []
 
@@ -290,7 +292,7 @@ class TestCliGGUFWeightSamples:
         )
 
         def fake_sampler(
-            gguf_path: str, tensor_names: list[str], max_rows: int = 256
+            gguf_path: str, tensor_names: list[str], max_rows: int = 256, **kwargs: Any
         ) -> list[tuple[str, Any, tuple[int, int]]]:
             import torch
 
@@ -300,7 +302,7 @@ class TestCliGGUFWeightSamples:
             "model_headroom.models.ternary_sampling.sample_weight_for_effective_rank",
             fake_sampler,
         )
-        result = _gguf_weight_samples(str(fake_file), "single_tile", None)
+        result = _gguf_weight_samples(str(fake_file), "single_tile", None, "cpu")
         assert result is not None
         assert len(result) == 1
         ws = result[0]
@@ -335,7 +337,7 @@ class TestCliGGUFWeightSamples:
             "model_headroom.models.ternary_sampling.sample_weight_for_effective_rank",
             fake_sampler,
         )
-        result = _gguf_weight_samples(str(fake_file), "single_tile", None)
+        result = _gguf_weight_samples(str(fake_file), "single_tile", None, "cpu")
         assert result is None
         err = capsys.readouterr().err
         assert "warning: cannot sample GGUF weights" in err
@@ -410,3 +412,203 @@ class TestCliGGUFWeightSamples:
         assert result == 0
         assert captured.get("weight_samples") is None
         assert sampler_calls == []
+
+
+class TestCliDataFileErrorMessages:
+    """The CLI must print an instructive error (cause + path + flag + expected
+    format + example location) for every data-file failure, never a bare path."""
+
+    def _err(self, tmp_path: Any, *extra: str) -> str:
+        args = [
+            "--model-name",
+            "test",
+            "--model-path",
+            str(tmp_path),
+            "--output-format",
+            "json",
+        ]
+        args.extend(extra)
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            result = main(args)
+        assert result == 1
+        return buf.getvalue()
+
+    # ---- weight pairs ----
+    def test_weight_pairs_missing_file(self, tmp_path: Any) -> None:
+        err = self._err(tmp_path, "--weight-pairs-file", "/nonexistent/wp.json")
+        assert "file does not exist" in err
+        assert "/nonexistent/wp.json" in err
+        assert "--weight-pairs-file" in err
+        assert "weight_pairs JSON" in err
+        assert "download.py" in err
+
+    def test_weight_pairs_malformed_json(self, tmp_path: Any) -> None:
+        bad = tmp_path / "bad.json"
+        bad.write_text("not json")
+        err = self._err(tmp_path, "--weight-pairs-file", str(bad))
+        assert "JSON is malformed" in err
+        assert str(bad) in err
+        assert "--weight-pairs-file" in err
+        assert "weight_pairs JSON" in err
+
+    def test_weight_pairs_wrong_top_level_type(self, tmp_path: Any) -> None:
+        bad = tmp_path / "wp.json"
+        bad.write_text('"just a string"')
+        err = self._err(tmp_path, "--weight-pairs-file", str(bad))
+        assert "expected JSON object or list" in err
+        assert str(bad) in err
+        assert "--weight-pairs-file" in err
+        assert "pairs" in err
+
+    def test_weight_pairs_missing_keys(self, tmp_path: Any) -> None:
+        bad = tmp_path / "wp.json"
+        bad.write_text(
+            json.dumps({"pairs": [{"gradient": [[1.0]], "weight": [[1.0]]}]})
+        )
+        err = self._err(tmp_path, "--weight-pairs-file", str(bad))
+        assert "missing required keys" in err
+        assert "'layer_name'" in err
+        assert str(bad) in err
+        assert "--weight-pairs-file" in err
+
+    def test_weight_pairs_empty(self, tmp_path: Any) -> None:
+        bad = tmp_path / "wp.json"
+        bad.write_text(json.dumps({"pairs": []}))
+        err = self._err(tmp_path, "--weight-pairs-file", str(bad))
+        assert "no valid weight pairs found" in err
+        assert str(bad) in err
+        assert "--weight-pairs-file" in err
+
+    def test_weight_pairs_wrong_tensor_rank(self, tmp_path: Any) -> None:
+        bad = tmp_path / "wp.json"
+        bad.write_text(
+            json.dumps(
+                {
+                    "pairs": [
+                        {
+                            "gradient": [[[1.0, 2.0], [3.0, 4.0]]],
+                            "weight": [[1.0, 2.0], [3.0, 4.0]],
+                            "layer_name": "l0",
+                        }
+                    ]
+                }
+            )
+        )
+        err = self._err(tmp_path, "--weight-pairs-file", str(bad))
+        assert "2-D [rows, cols]" in err
+        assert str(bad) in err
+        assert "--weight-pairs-file" in err
+
+    # ---- activations ----
+    def test_activations_missing_file(self, tmp_path: Any) -> None:
+        err = self._err(tmp_path, "--activations", "/nonexistent/acts.json")
+        assert "file does not exist" in err
+        assert "/nonexistent/acts.json" in err
+        assert "--activations" in err
+
+    def test_activations_malformed_json(self, tmp_path: Any) -> None:
+        bad = tmp_path / "bad.json"
+        bad.write_text("not json")
+        err = self._err(tmp_path, "--activations", str(bad))
+        assert "JSON is malformed" in err
+        assert str(bad) in err
+        assert "--activations" in err
+
+    def test_activations_missing_keys(self, tmp_path: Any) -> None:
+        bad = tmp_path / "acts.json"
+        bad.write_text(json.dumps({"wrong": "shape"}))
+        err = self._err(tmp_path, "--activations", str(bad))
+        assert "missing required keys" in err
+        assert "'metadata'" in err or "'layers'" in err
+        assert str(bad) in err
+        assert "--activations" in err
+
+    # ---- mlp activations ----
+    def test_mlp_activations_missing_file(self, tmp_path: Any) -> None:
+        err = self._err(tmp_path, "--mlp-activations-file", "/nonexistent/mlp.json")
+        assert "file does not exist" in err
+        assert "/nonexistent/mlp.json" in err
+        assert "--mlp-activations-file" in err
+
+    def test_mlp_activations_wrong_ndim(self, tmp_path: Any) -> None:
+        bad = tmp_path / "mlp.json"
+        bad.write_text(
+            json.dumps({"layers": [{"activations": [[1.0, 2.0]], "layer_name": "l0"}]})
+        )
+        err = self._err(tmp_path, "--mlp-activations-file", str(bad))
+        assert "3-D [batch, seq, hidden]" in err
+        assert str(bad) in err
+        assert "--mlp-activations-file" in err
+
+    def test_mlp_activations_empty(self, tmp_path: Any) -> None:
+        bad = tmp_path / "mlp.json"
+        bad.write_text(json.dumps({"layers": []}))
+        err = self._err(tmp_path, "--mlp-activations-file", str(bad))
+        assert "no valid MLP activation layers found" in err
+        assert str(bad) in err
+        assert "--mlp-activations-file" in err
+
+    # ---- expert weights ----
+    def test_expert_weights_missing_file(self, tmp_path: Any) -> None:
+        err = self._err(tmp_path, "--expert-weights-file", "/nonexistent/ew.json")
+        assert "file does not exist" in err
+        assert "/nonexistent/ew.json" in err
+        assert "--expert-weights-file" in err
+
+    def test_expert_weights_single_expert(self, tmp_path: Any) -> None:
+        bad = tmp_path / "ew.json"
+        bad.write_text(
+            json.dumps(
+                {"layers": [{"expert_weights": [[[1.0, 2.0]]], "layer_name": "l0"}]}
+            )
+        )
+        err = self._err(tmp_path, "--expert-weights-file", str(bad))
+        assert "at least 2 weight arrays" in err
+        assert str(bad) in err
+        assert "--expert-weights-file" in err
+
+    def test_expert_weights_empty(self, tmp_path: Any) -> None:
+        bad = tmp_path / "ew.json"
+        bad.write_text(json.dumps({"layers": []}))
+        err = self._err(tmp_path, "--expert-weights-file", str(bad))
+        assert "no valid expert weight layers found" in err
+        assert str(bad) in err
+        assert "--expert-weights-file" in err
+
+    # ---- gradient provenance ----
+    def test_gradient_provenance_missing_file(self, tmp_path: Any) -> None:
+        err = self._err(
+            tmp_path, "--gradient-provenance-file", "/nonexistent/prov.json"
+        )
+        assert "file does not exist" in err
+        assert "/nonexistent/prov.json" in err
+        assert "--gradient-provenance-file" in err
+
+    def test_gradient_provenance_flat_wrong_nesting(self, tmp_path: Any) -> None:
+        bad = tmp_path / "prov.json"
+        bad.write_text(json.dumps({"source_type": "measured"}))
+        err = self._err(tmp_path, "--gradient-provenance-file", str(bad))
+        assert "missing the nested 'provenance' object" in err
+        assert str(bad) in err
+        assert "--gradient-provenance-file" in err
+
+    def test_gradient_provenance_bad_source_type(self, tmp_path: Any) -> None:
+        bad = tmp_path / "prov.json"
+        bad.write_text(json.dumps({"provenance": {"source_type": "bogus"}}))
+        err = self._err(tmp_path, "--gradient-provenance-file", str(bad))
+        assert "'source_type' must be one of" in err
+        assert str(bad) in err
+        assert "--gradient-provenance-file" in err
+
+    # ---- regression: pin exact informative text ----
+    def test_weight_pairs_missing_file_pins_informative_text(
+        self, tmp_path: Any
+    ) -> None:
+        err = self._err(tmp_path, "--weight-pairs-file", "/no/such/wp.json")
+        assert (
+            "Error loading weight pairs from /no/such/wp.json: "
+            "file does not exist: /no/such/wp.json. "
+            "Use --weight-pairs-file to provide a weight_pairs JSON file; "
+            "see src/model_headroom/download.py for the expected JSON format."
+        ) in err

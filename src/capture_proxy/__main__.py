@@ -44,6 +44,16 @@ _CONFIG_KEYS = (
     "headroom_max_bytes",
     "headroom_interval",
     "headroom_dir",
+    "sync_remote",
+    "sync_cmd",
+    "sync_min_age",
+    "sync_interval",
+    "sync_dry_run",
+    "sync_rclone_opts",
+    "sync_rclone_binary",
+    "sync_pid_file",
+    "sync_log_file",
+    "machine_id",
 )
 
 #: Canonical default config written by ``--ensure-config``. Lives in CODE, not
@@ -221,6 +231,104 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Log file path when daemonized (default: ~/.cache/capture-proxy/proxy.log)",
     )
+    # --- capture sync flags (design §2) ---
+    # Mutually exclusive with --daemon/--stop/--status; exactly one of the four
+    # action flags may be set.
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="One-shot capture sync: run rclone once from source to "
+        "<remote>/<instance-id>, then exit",
+    )
+    parser.add_argument(
+        "--sync-daemon",
+        action="store_true",
+        help="Start the sync daemon loop (rclone every --sync-interval seconds)",
+    )
+    parser.add_argument(
+        "--sync-stop",
+        action="store_true",
+        help="Stop the sync daemon loop (SIGTERM to its PID, remove sync.pid)",
+    )
+    parser.add_argument(
+        "--sync-status",
+        action="store_true",
+        help="Show sync daemon loop status (PID, liveness, log path)",
+    )
+    parser.add_argument(
+        "--sync-remote",
+        type=str,
+        default=None,
+        help="Remote prefix for sync destination. Final dest is "
+        "<remote>/<instance-id> (env: CAPTURE_SYNC_REMOTE, default: gdrive:captures)",
+    )
+    parser.add_argument(
+        "--sync-cmd",
+        type=str,
+        default=None,
+        help="copy (default, never deletes) or sync (mirror, DELETES remote "
+        "files absent locally). sync requires an explicit instance id "
+        "(env: CAPTURE_SYNC_CMD, default: copy)",
+    )
+    parser.add_argument(
+        "--sync-min-age",
+        type=str,
+        default=None,
+        help="Skip files modified within the last N (still being appended); "
+        "picked up on a later cycle once settled. 0 disables "
+        "(env: CAPTURE_SYNC_MIN_AGE, default: 60s)",
+    )
+    parser.add_argument(
+        "--sync-interval",
+        type=str,
+        default=None,
+        help="Daemon loop period in seconds, whole number "
+        "(env: CAPTURE_SYNC_INTERVAL, default: 300). Deviates from design §2 "
+        "type=int so the literal validation message is reachable from the CLI "
+        "(argparse's own type=int error would otherwise replace it).",
+    )
+    parser.add_argument(
+        "--sync-dry-run",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Preview rclone actions without transferring "
+        "(env: CAPTURE_SYNC_DRY_RUN, default: None)",
+    )
+    parser.add_argument(
+        "--sync-rclone-opts",
+        type=str,
+        default=None,
+        help="Extra rclone flags appended to the rclone argv, split with "
+        "shlex.split (env: CAPTURE_SYNC_RCLONE_OPTS, default: '')",
+    )
+    parser.add_argument(
+        "--sync-rclone-binary",
+        type=str,
+        default=None,
+        help="rclone binary name or path "
+        "(env: CAPTURE_SYNC_RCLONE_BINARY, default: rclone)",
+    )
+    parser.add_argument(
+        "--sync-machine-id",
+        type=str,
+        default=None,
+        help="Explicit instance id override. Chain: flag > CAPTURE_MACHINE_ID "
+        "env > config machine_id > derived (hostname > /etc/machine-id)",
+    )
+    parser.add_argument(
+        "--sync-pid-file",
+        type=str,
+        default=None,
+        help="PID file path for the sync daemon loop "
+        "(default: ~/.cache/capture-proxy/sync.pid)",
+    )
+    parser.add_argument(
+        "--sync-log-file",
+        type=str,
+        default=None,
+        help="Log file path for the sync daemon loop "
+        "(default: ~/.cache/capture-proxy/sync.log)",
+    )
     return parser.parse_args(args)
 
 
@@ -307,6 +415,51 @@ def _resolve_setting(
     if config_value is not None:
         return str(config_value)
     return default
+
+
+_BOOL_TRUE = {"true", "1", "yes", "on"}
+_BOOL_FALSE = {"false", "0", "no", "off"}
+_BOOL_VOCAB = _BOOL_TRUE | _BOOL_FALSE
+
+
+def _resolve_bool(
+    cli: object | None, env_name: str, config: dict[str, object], default: str
+) -> bool:
+    """Resolve a boolean setting: CLI flag > env var > config file > default.
+
+    Accepts ``bool`` and ``str`` (true/false/1/0/yes/no/on/off, case-insensitive).
+    TOML bools arrive as ``True``/``False`` from tomllib. An unrecognized
+    string raises ``ValueError`` with the design §3 literal message.
+    """
+    if cli is not None:
+        if isinstance(cli, bool):
+            return cli
+        return _parse_bool(str(cli), env_name)
+    env_value = os.environ.get(env_name)
+    if env_value is not None:
+        return _parse_bool(env_value, env_name)
+    config_key = env_name[len("CAPTURE_") :].lower()
+    config_value = config.get(config_key)
+    if config_value is not None:
+        if isinstance(config_value, bool):
+            return config_value
+        return _parse_bool(str(config_value), env_name)
+    return default.strip().lower() in _BOOL_TRUE
+
+
+def _parse_bool(value: str, env_name: str) -> bool:
+    """Parse a boolean string; raise ValueError on unrecognized vocabulary."""
+    lowered = value.strip().lower()
+    if lowered in _BOOL_TRUE:
+        return True
+    if lowered in _BOOL_FALSE:
+        return False
+    flag_name = env_name[len("CAPTURE_") :].lower().replace("_", "-")
+    raise ValueError(
+        f"error: --{flag_name} must be true/false/1/0/yes/no/on/off "
+        f"(got: {value}) — valid example: {env_name}=false "
+        "capture-proxy --sync"
+    )
 
 
 def _resolve_aliases_raw(
@@ -573,6 +726,39 @@ def main(args: list[str] | None = None) -> int:
         their own codes.
     """
     parsed = parse_args(args)
+
+    # D2: action-flag validation runs before any short-circuit so
+    # --sync --stop / --sync --status cannot silently short-circuit past sync.
+    sync_action_flags = [
+        parsed.sync,
+        parsed.sync_daemon,
+        parsed.sync_stop,
+        parsed.sync_status,
+    ]
+    proxy_action_flags = [parsed.daemon, parsed.stop, parsed.status]
+    if any(sync_action_flags):
+        if sum(1 for f in sync_action_flags if f) != 1:
+            print(
+                "error: exactly one of --sync, --sync-daemon, --sync-stop, "
+                "--sync-status may be set",
+                file=sys.stderr,
+            )
+            return 2
+        if any(proxy_action_flags):
+            print(
+                "error: --sync/--sync-daemon/--sync-stop/--sync-status is "
+                "mutually exclusive with --daemon/--stop/--status",
+                file=sys.stderr,
+            )
+            return 2
+        if parsed.print_effective_config:
+            print(
+                "error: --print-effective-config cannot be combined with "
+                "--sync/--sync-daemon/--sync-stop/--sync-status",
+                file=sys.stderr,
+            )
+            return 2
+
     pid_file = Path(parsed.pid_file) if parsed.pid_file else _default_pid_path()
 
     if parsed.stop:
@@ -589,7 +775,15 @@ def main(args: list[str] | None = None) -> int:
             f"capture-proxy: "
             f"{'created' if created else 'kept existing'} config {config_path}"
         )
-        if not (parsed.status or parsed.daemon or parsed.print_effective_config):
+        if not (
+            parsed.status
+            or parsed.daemon
+            or parsed.print_effective_config
+            or parsed.sync
+            or parsed.sync_daemon
+            or parsed.sync_stop
+            or parsed.sync_status
+        ):
             return 0
 
     config = _load_config(config_path)
@@ -692,6 +886,149 @@ def main(args: list[str] | None = None) -> int:
             os.environ["CAPTURE_MODEL_TASKS"] = model_tasks_raw
     else:
         os.environ.pop("CAPTURE_MODEL_TASKS", None)
+
+    # --- capture sync routing (design §2/§4) ---
+    # Action-flag validation already ran immediately after parse_args (see above).
+    # Lazily import sync only inside the sync branch — never at module top level,
+    # so the proxy-server path never loads rclone/subprocess logic.
+    from capture_proxy import sync as _sync
+
+    sync_remote = _resolve_setting(
+        parsed.sync_remote, "CAPTURE_SYNC_REMOTE", config, "gdrive:captures"
+    )
+    sync_cmd = _resolve_setting(parsed.sync_cmd, "CAPTURE_SYNC_CMD", config, "copy")
+    try:
+        _sync.validate_sync_cmd(sync_cmd)
+    except ValueError as err:
+        print(str(err), file=sys.stderr)
+        return 2
+    sync_min_age = _resolve_setting(
+        parsed.sync_min_age, "CAPTURE_SYNC_MIN_AGE", config, "60s"
+    )
+    interval_raw = (
+        str(parsed.sync_interval)
+        if parsed.sync_interval is not None
+        else _resolve_setting(None, "CAPTURE_SYNC_INTERVAL", config, "300")
+    )
+    try:
+        sync_interval = _sync.validate_interval(interval_raw)
+    except ValueError as err:
+        print(str(err), file=sys.stderr)
+        return 2
+    try:
+        sync_dry_run = _resolve_bool(
+            parsed.sync_dry_run, "CAPTURE_SYNC_DRY_RUN", config, "false"
+        )
+    except ValueError as err:
+        print(str(err), file=sys.stderr)
+        return 2
+    sync_rclone_opts = _resolve_setting(
+        parsed.sync_rclone_opts, "CAPTURE_SYNC_RCLONE_OPTS", config, ""
+    )
+    sync_rclone_binary = _resolve_setting(
+        parsed.sync_rclone_binary,
+        "CAPTURE_SYNC_RCLONE_BINARY",
+        config,
+        "rclone",
+    )
+    sync_pid_file = (
+        Path(parsed.sync_pid_file)
+        if parsed.sync_pid_file
+        else Path.home() / ".cache" / "capture-proxy" / "sync.pid"
+    )
+    sync_log_file = (
+        Path(parsed.sync_log_file)
+        if parsed.sync_log_file
+        else Path.home() / ".cache" / "capture-proxy" / "sync.log"
+    )
+    # machine_id: flag > CAPTURE_MACHINE_ID env > config machine_id >
+    # derived (hostname > /etc/machine-id)
+    machine_id_cli = parsed.sync_machine_id
+    machine_id_env = os.environ.get("CAPTURE_MACHINE_ID")
+    machine_id_config_raw = config.get("machine_id")
+    machine_id_config: str | None = (
+        str(machine_id_config_raw) if machine_id_config_raw is not None else None
+    )
+    try:
+        import socket
+
+        hostname = socket.gethostname()
+    except OSError:
+        hostname = None
+    machine_id_path = Path("/etc/machine-id")
+    machine_id_file_content: str | None = None
+    if machine_id_path.is_file():
+        try:
+            machine_id_file_content = machine_id_path.read_text().strip()
+        except OSError:
+            machine_id_file_content = None
+    instance_id, explicit = _sync.resolve_instance_id(
+        machine_id_cli,
+        machine_id_env,
+        machine_id_config,
+        hostname,
+        machine_id_file_content,
+    )
+    if not instance_id:
+        print(
+            "error: no instance id — --sync-machine-id, CAPTURE_MACHINE_ID, "
+            "config machine_id, hostname, and /etc/machine-id are all empty; "
+            "set one — valid example: CAPTURE_MACHINE_ID=prod-box-1 "
+            "capture-proxy --sync",
+            file=sys.stderr,
+        )
+        return 1
+    # Machine-id fallback hazard warning: id derived from /etc/machine-id
+    # (hostname empty, no flag/env/config id). Shared across instances.
+    if not explicit and not hostname and instance_id:
+        print(
+            "WARNING: falling back to /etc/machine-id ("
+            + instance_id
+            + ") — image-baked machine-ids are shared across instances; "
+            "set CAPTURE_MACHINE_ID or --sync-machine-id for a unique key; "
+            "never use --sync-cmd sync with a derived id",
+            file=sys.stderr,
+        )
+    if sync_cmd == "sync" and not explicit:
+        print(
+            "error: --sync-cmd sync requires an explicit instance id you own "
+            "alone; derived id "
+            f"{instance_id} from hostname or /etc/machine-id is not safe for "
+            "a destructive mirror — set CAPTURE_MACHINE_ID or pass "
+            "--sync-machine-id — valid example: CAPTURE_MACHINE_ID=my-dev-box "
+            "capture-proxy --sync-cmd sync",
+            file=sys.stderr,
+        )
+        return 1
+
+    settings: dict[str, object] = {
+        "sync_remote": sync_remote,
+        "sync_cmd": sync_cmd,
+        "sync_min_age": sync_min_age,
+        "sync_interval": str(sync_interval),
+        "sync_dry_run": sync_dry_run,
+        "sync_rclone_opts": sync_rclone_opts,
+        "sync_rclone_binary": sync_rclone_binary,
+        "sync_pid_file": str(sync_pid_file),
+        "sync_log_file": str(sync_log_file),
+        "sync_instance_id": instance_id,
+        "sync_instance_id_explicit": explicit,
+        "sync_base_path": base_path,
+        "sync_config_path": str(config_path),
+    }
+
+    if parsed.sync:
+        return _sync.run_sync_once(settings)
+    if parsed.sync_daemon:
+        # Child re-invocation (CAPTURE_SYNC_DAEMONIZED=1) runs the loop
+        # directly; the parent path (sync_daemon_loop) spawns the child.
+        if os.environ.get("CAPTURE_SYNC_DAEMONIZED") == "1":
+            return _sync._run_loop(settings)
+        return _sync.sync_daemon_loop(settings)
+    if parsed.sync_stop:
+        return _sync.sync_stop(sync_pid_file)
+    if parsed.sync_status:
+        return _sync.sync_status(sync_pid_file)
 
     if parsed.daemon:
         log_file = Path(parsed.log_file) if parsed.log_file else _default_log_path()

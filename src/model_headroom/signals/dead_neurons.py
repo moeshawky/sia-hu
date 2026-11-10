@@ -21,6 +21,17 @@ def analyze_dead_neurons(
         neuron_means = tensor.mean(dim=(0, 1))
         total_neurons = neuron_means.shape[0]
 
+        if not torch.isfinite(neuron_means).all() or not torch.isfinite(tensor).all():
+            return DeadNeuronReport(
+                total_neurons=total_neurons,
+                dead_count=0,
+                dead_fraction=0.0,
+                dead_indices=None,
+                signal_status="error",
+                error_message="Non-finite (NaN/Inf) values detected in activations",
+                source_type=source_type,
+            )
+
         dead_mask = neuron_means < threshold
         dead_count = int(dead_mask.sum().item())
         dead_fraction = dead_count / total_neurons if total_neurons > 0 else 0.0

@@ -16,7 +16,8 @@ sia-hu/
   PROJECT-ROADMAP.md         → unified `sia` CLI plan, phases 1-2
   pyproject.toml             → single project (sia-hu); hatchling build
   uv.lock                    → single lockfile at root
-  bootstrap.sh               → clone + verify + push gate
+  sia doctor                 → read-only workspace preflight (no commit/push)
+  sia publish                → push current branch, verify remote ref, never auto-commit
   docs/                      → unified documentation tree (this tree)
   src/                       → source packages
   capture-proxy/             → carrier tests, roadmap (docs moved to docs/capture-proxy/)
@@ -48,8 +49,9 @@ src/
     stream.py      → SSE parser and streaming log writer
     models.py      → Pydantic schemas (CaptureRecord, HeadroomRef, …)
     names.py       → Shared name contract (stdlib only, R-01 safe)
+    sync.py        → Native off-box capture sync (rclone subprocess, lazy import)
   model_headroom/            → scoring authority package
-    cli.py           → CLI entry point (19 flags)
+    cli.py           → CLI entry point (20 flags)
     __main__.py      → Enables python -m model_headroom
     analysis/
       orchestrator.py  → Runs signals with timing, assembles HeadroomReport

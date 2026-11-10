@@ -124,6 +124,18 @@ def analyze_growth_factor(
         )
 
     try:
+        if any(p.model_params <= 0 or p.measured_loss <= 0 for p in isoflop_points):
+            return GrowthFactorReport(
+                alpha=0.0,
+                crossover_params=None,
+                crossover_loss=None,
+                fit_quality_r2=0.0,
+                data_points_used=len(isoflop_points),
+                signal_status="error",
+                error_message=(
+                    "Invalid input: model_params and measured_loss must be > 0"
+                ),
+            )
         # Fit quadratic to log(params) vs log(loss)
         log_params = [math.log(p.model_params) for p in isoflop_points]
         log_loss = [math.log(p.measured_loss) for p in isoflop_points]
