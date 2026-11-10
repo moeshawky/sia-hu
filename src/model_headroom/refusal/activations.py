@@ -231,7 +231,7 @@ def capture_last_token_residuals(
                 )
                 encoded = {k: v.to(device) for k, v in encoded.items()}
                 model(**encoded)
-    except (RuntimeError, ValueError, TypeError, AttributeError):
+    except (RuntimeError, ValueError, TypeError, AttributeError, ImportError, OSError):
         return None
     finally:
         for handle in handles:

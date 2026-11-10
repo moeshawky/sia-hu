@@ -71,7 +71,7 @@ is an echo.
 | Signal names | `names.py` `SIGNAL_KEYS` (authority's core-6 verbatim) | Using `SIGNAL_KEYS` as sidecar signal keys |
 | Signal semantics | `models/types.py` frozen dataclasses | Never inventing a signal meaning; `null` = unproduced, never healthy-zero |
 | Frozen dataclass invariants | `models/types.py` (21 frozen dataclasses) | Never mutating; constructing new instances only |
-| NFR-01 (CPU-only weights) | Architecture decision | Tensors load to CPU RAM only; no TPU/XLA import |
+| NFR-01 (accelerator-preferred weights, CPU fallback) | Architecture decision | When an accelerator exists, use it; CPU when none exists or `--device cpu`; requesting an unavailable accelerator is an error, never a silent downgrade |
 
 **Reserved keys (5 of 6 sidecar signal keys remain null except effective_rank):**
 

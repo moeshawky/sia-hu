@@ -29,6 +29,7 @@ def sample_weight_for_effective_rank(
     tensor_names: list[str],
     max_rows: int = 256,
     seed: int = 42,
+    device: str = "cpu",
 ) -> list[tuple[str, torch.Tensor, tuple[int, int]]]:
     """Sample deterministic rows from GGUF weight tensors for R-03 effective rank.
 
@@ -69,7 +70,7 @@ def sample_weight_for_effective_rank(
         if parent_shape is None:
             continue
         sample = extract_gguf_weight_sample(
-            gguf_path, tensor_name, max_rows=max_rows, seed=seed
+            gguf_path, tensor_name, max_rows=max_rows, seed=seed, device=device
         )
         if sample is None:
             continue

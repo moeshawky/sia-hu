@@ -10,6 +10,8 @@ Provides: analyze_grad_weight_ratios().
 
 from __future__ import annotations
 
+import math
+
 import torch
 
 from model_headroom.models.types import GradientWeightPair, GradWeightRatio
@@ -17,6 +19,7 @@ from model_headroom.models.types import GradientWeightPair, GradWeightRatio
 
 def analyze_grad_weight_ratios(
     pairs: list[GradientWeightPair],
+    device: str = "cpu",
 ) -> list[GradWeightRatio]:
     """Compute gradient-to-weight norm ratios for a list of layer pairs.
 
@@ -54,8 +57,8 @@ def analyze_grad_weight_ratios(
     ratios: list[float] = []
 
     for pair in pairs:
-        weight_norm = torch.norm(pair.weight).item()
-        grad_norm = torch.norm(pair.gradient).item()
+        weight_norm = torch.norm(pair.weight.to(device)).item()
+        grad_norm = torch.norm(pair.gradient.to(device)).item()
 
         if weight_norm == 0.0:
             results.append(
@@ -76,6 +79,17 @@ def analyze_grad_weight_ratios(
                     z_score=0.0,
                     layer_name=pair.layer_name,
                     signal_status="no_gradient",
+                )
+            )
+            ratios.append(0.0)
+        elif not math.isfinite(grad_norm):
+            results.append(
+                GradWeightRatio(
+                    ratio=0.0,
+                    is_high_pressure=False,
+                    z_score=0.0,
+                    layer_name=pair.layer_name,
+                    signal_status="invalid_evidence",
                 )
             )
             ratios.append(0.0)

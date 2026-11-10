@@ -103,6 +103,44 @@ class TestRecovery:
         assert report.cohen_d < 0.9
 
 
+class TestRecoveryDevice:
+    def test_cpu_device_returns_cpu_direction(self) -> None:
+        deltas, truth = _rank1_deltas(seed=1)
+        report = recover_direction_from_weight_deltas(deltas, device="cpu")
+        assert report.direction_status == "computed"
+        assert report.direction is not None
+        assert report.direction.device.type == "cpu"
+        assert abs(abs(float(report.direction @ truth)) - 1.0) < 1e-4
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+    def test_cuda_device_returns_home_to_cpu(self) -> None:
+        deltas, truth = _rank1_deltas(seed=1)
+        report = recover_direction_from_weight_deltas(deltas, device="cuda")
+        assert report.direction_status == "computed"
+        assert report.direction is not None
+        # Compute ran on CUDA; the returned direction comes home to CPU so the
+        # serialized report keeps a device-independent type.
+        assert report.direction.device.type == "cpu"
+        assert abs(abs(float(report.direction @ truth)) - 1.0) < 1e-4
+
+    def test_svd_executes_on_requested_device(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        recorded: list[str] = []
+        real_svd = torch.linalg.svd
+
+        def recording_svd(*args, **kwargs):
+            stacked = args[0]
+            recorded.append(stacked.device.type)
+            return real_svd(*args, **kwargs)
+
+        monkeypatch.setattr(torch.linalg, "svd", recording_svd)
+        deltas, _ = _rank1_deltas(seed=1)
+        report = recover_direction_from_weight_deltas(deltas, device="cuda")
+        assert report.direction_status == "computed"
+        assert recorded == ["cuda"], f"SVD ran on {recorded}, expected cuda"
+
+
 class TestDeltaLoading:
     def test_loads_wrapped_document(self, tmp_path: Path) -> None:
         path = tmp_path / "deltas.json"

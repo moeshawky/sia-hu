@@ -34,6 +34,7 @@ _EPS = 1e-12
 def recover_direction_from_weight_deltas(
     deltas: Sequence[torch.Tensor],
     spec: RefusalDirectionSpec | None = None,
+    device: str = "cpu",
 ) -> RefusalDirectionReport:
     """Recover the refusal direction as the top left singular vector of ``deltas``.
 
@@ -42,7 +43,9 @@ def recover_direction_from_weight_deltas(
     ``degenerate`` when the stacked deltas carry no variance, and ``computed``
     otherwise. The leading singular value is reported as ``cohen_d``'s stand-in
     via ``direction_norm`` so callers can see how dominant the rank-1 component
-    is before trusting it.
+    is before trusting it. The stacked deltas and SVD run on ``device``; the
+    returned ``direction`` is moved back to CPU so the serialized report keeps a
+    device-independent type that callers can convert with ``.numpy()``.
     """
     spec = spec or RefusalDirectionSpec()
 
@@ -95,8 +98,9 @@ def recover_direction_from_weight_deltas(
     hidden = heights.pop()
     # Arditi abliteration lives in the output/residual space, so the refusal
     # direction is the top LEFT singular vector: stack deltas horizontally so
-    # the left factor has length out_features (== hidden).
-    stacked = torch.cat([d.to(dtype=torch.float32) for d in deltas], dim=1)
+    # the left factor has length out_features (== hidden). Compute on the
+    # requested device; the returned direction comes back to CPU.
+    stacked = torch.cat([d.to(dtype=torch.float32) for d in deltas], dim=1).to(device)
 
     if not torch.isfinite(stacked).all():
         return RefusalDirectionReport(
@@ -121,7 +125,7 @@ def recover_direction_from_weight_deltas(
             layer_stats=[],
             selection="weight_delta_svd",
             direction_status="error",
-            error_message=f"SVD failed: {exc}",
+            error_message=f"SVD failed on device {device}: {exc}; retry with --device cpu",
         )
 
     leading = float(singular[0]) if singular.numel() else 0.0
@@ -140,6 +144,9 @@ def recover_direction_from_weight_deltas(
     direction = u[:, 0]
     # normalise to unit length (SVD vector is already unit, but be explicit)
     direction = direction / direction.norm().clamp(min=_EPS)
+    # The report is serialized to JSON and callers may call .numpy(), so the
+    # direction comes home to CPU: compute on the accelerator, return on host.
+    direction = direction.to("cpu")
     energy = float((singular**2).sum())
     dominance = (leading**2) / energy if energy > _EPS else 0.0
 

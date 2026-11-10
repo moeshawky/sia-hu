@@ -82,7 +82,6 @@ sia-hu/
   AGENTS.md            → agent/operator gate (gitignored, on disk)
   PROJECT-ROADMAP.md   → unified `sia` CLI plan, phases 1-2
   pyproject.toml       → single project (sia-hu); one lockfile
-  bootstrap.sh         → clone + verify + push gate
   src/                 → source packages (capture_proxy, model_headroom, sia)
   capture-proxy/       → carrier tests, config, scripts (docs moved to docs/)
   model_headroom/      → authority tests (docs moved to docs/)

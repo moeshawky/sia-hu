@@ -173,7 +173,7 @@ class TestOrchestratorDense:
         assert by_name["load_balance"] == "single_expert"
         assert by_name["specialization"] == "single_expert"
         assert by_name["loss_saturation"] == "computed"
-        assert by_name["growth_factor"] == "computed"
+        assert by_name["growth_factor"] == "insufficient_data"
         assert by_name["effective_rank"] == "computed"
         assert by_name["grad_weight_ratio"] == "computed"
         assert by_name["dead_neurons"] == "computed"
@@ -332,7 +332,7 @@ class TestScoringNotApplicable:
 
     def test_skipped_still_counts_neutral(self) -> None:
         score = compute_headroom_score(TestScoringNotApplicable._report("skipped"))
-        assert score == pytest.approx(0.9)
+        assert score == pytest.approx(0.8)
         assert score < 1.0
 
 
@@ -357,19 +357,20 @@ class TestDenseAsOneExpert:
         moe = TestDenseAsOneExpert._measured_weight_report("moe")
         assert dense.coverage_metrics is not None
         assert moe.coverage_metrics is not None
-        assert dense.coverage_metrics.measured_weight == pytest.approx(0.30)
-        assert moe.coverage_metrics.measured_weight == pytest.approx(0.30)
-        assert dense.coverage_metrics.total_applicable_weight == pytest.approx(1.00)
+        # defaults are unavailable: nothing is measured without explicit provenance
+        assert dense.coverage_metrics.measured_weight == pytest.approx(0.0)
+        assert moe.coverage_metrics.measured_weight == pytest.approx(0.0)
+        # dense excludes its two single_expert signals from the denominator;
+        # moe (no activation/expert data) keeps all seven applicable
+        assert dense.coverage_metrics.total_applicable_weight == pytest.approx(0.80)
         assert moe.coverage_metrics.total_applicable_weight == pytest.approx(1.00)
-        assert dense.coverage_metrics.coverage == pytest.approx(
-            moe.coverage_metrics.coverage
-        )
-        assert dense.overall_headroom_score == pytest.approx(moe.overall_headroom_score)
+        assert dense.coverage_metrics.coverage == pytest.approx(0.0)
+        assert moe.coverage_metrics.coverage == pytest.approx(0.0)
 
     def test_dense_expert_signals_count_in_the_denominator(self) -> None:
         report = TestDenseAsOneExpert._measured_weight_report("dense")
         assert report.coverage_metrics is not None
-        assert report.coverage_metrics.unmeasured_weight == pytest.approx(0.70)
+        assert report.coverage_metrics.unmeasured_weight == pytest.approx(0.80)
 
     def test_dense_load_balance_is_never_zero(self) -> None:
         report = TestDenseAsOneExpert._measured_weight_report("dense")

@@ -16,7 +16,7 @@ From the repo root (`/kaggle/working/sia-hu`):
 pip install -e ".[headroom]"
 ```
 
-This installs the `sia-hu` package (version 0.2.0, `pyproject.toml:5-7`) in
+This installs the `sia-hu` package (version 0.3.0, `pyproject.toml:5-7`) in
 editable mode plus the `headroom` extra (`pyproject.toml:30-37`): `torch>=2.15`,
 `numpy>=2.5.4`, `safetensors>=0.8.0`, `huggingface_hub>=2.4`, `transformers>=5.22.1`,
 `accelerate>=1.15`. The base install (`pip install -e .`, `pyproject.toml:14-19`)
@@ -42,6 +42,17 @@ model-headroom \
   --model-name qwen3-0.6b \
   --model-path /kaggle/input/models/qwen-lm/qwen-3/transformers/0.6b/1
 ```
+
+GPU-accelerated invocation (when an accelerator is available):
+
+```bash
+model-headroom \
+  --model-name qwen3-0.6b \
+  --model-path /kaggle/input/models/qwen-lm/qwen-3/transformers/0.6b/1 \
+  --device cuda
+```
+
+Default (`--device auto`) resolves to the first available accelerator (cuda preferred), else CPU. `--device cpu` forces CPU. `--device` is declared at `cli.py:162-167`.
 
 `--model-path` must be a directory containing `config.json` (`cli.py:239-247`,
 `models/loader.py:59-74`). The architecture is auto-detected from the config
@@ -199,7 +210,7 @@ gradient provenance (`analysis/scoring.py:241-252`).
 - Decision-grade gate prevents acting on incomplete evidence
   (`analysis/scoring.py:255-260`, exit code 2 with `--analysis-mode decision_grade`,
   `cli.py:415-420`).
-- Weights load to CPU RAM by design (NFR-01) — no GPU required
+- Weights resolve through `src/model_headroom/device.py` — accelerator preferred (cuda, then xpu, then mps), CPU as fallback (NFR-01). Default `--device auto` uses the first available accelerator; `--device cpu` forces CPU.
   (`docs/model-headroom/README.md`).
 
 **Limitations:**
@@ -245,7 +256,7 @@ at `/kaggle/input/models/qwen-lm/qwen-3/transformers/0.6b/1`:
 
 - `pip install -e ".[headroom]"` — deps already satisfied (torch 2.11.0+cpu,
   numpy 2.1.3, safetensors 0.8.0, transformers 5.16.1, huggingface_hub 1.33.0,
-  accelerate 1.14.0); sia-hu 0.2.0 installed editable at
+  accelerate 1.14.0); sia-hu 0.3.0 installed editable at
   `/kaggle/working/sia-hu`.
 - Base run (`--model-name qwen3-0.6b --model-path ...`) — exit 0, all signals
   skipped/single_expert, composite 0.50, measured coverage 0%.
@@ -265,5 +276,5 @@ File:line references cited throughout are from:
 
 ---
 
-See also: `docs/model-headroom/README.md` (full CLI flag reference, 19 flags,
+See also: `docs/model-headroom/README.md` (full CLI flag reference, 20 flags,
 `cli.py:parse_args`).

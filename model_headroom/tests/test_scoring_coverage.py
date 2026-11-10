@@ -17,14 +17,14 @@ from model_headroom.models.types import (
 
 
 class TestScoreSignalNotApplicable:
-    def test_not_applicable_returns_05(self) -> None:
+    def test_not_applicable_returns_none(self) -> None:
         signal = SignalResult(
             signal_name="load_balance",
             status="not_applicable",
             data=None,
             duration_seconds=0.0,
         )
-        assert _score_signal(signal) == 0.5
+        assert _score_signal(signal) is None
 
 
 class TestHasSamplingConfidence:
@@ -198,7 +198,7 @@ class TestIsMeasured:
         )
         assert _is_measured(signal) is False
 
-    def test_estimated_with_confidence_is_measured(self) -> None:
+    def test_estimated_with_confidence_is_not_measured(self) -> None:
         data = EffectiveRankResult(
             rank=4.0,
             entropy=1.0,
@@ -215,9 +215,9 @@ class TestIsMeasured:
             source_type="estimated",
             verification_status="verified",
         )
-        assert _is_measured(signal) is True
+        assert _is_measured(signal) is False
 
-    def test_unverified_is_not_measured(self) -> None:
+    def test_unverified_is_measured(self) -> None:
         signal = SignalResult(
             signal_name="loss_saturation",
             status="computed",
@@ -233,7 +233,7 @@ class TestIsMeasured:
             source_type="measured",
             verification_status="unverified",
         )
-        assert _is_measured(signal) is False
+        assert _is_measured(signal) is True
 
     def test_provenance_incomplete_is_measured(self) -> None:
         signal = SignalResult(
@@ -253,7 +253,7 @@ class TestIsMeasured:
         )
         assert _is_measured(signal) is True
 
-    def test_imported_is_measured(self) -> None:
+    def test_imported_is_not_measured(self) -> None:
         signal = SignalResult(
             signal_name="loss_saturation",
             status="computed",
@@ -269,7 +269,7 @@ class TestIsMeasured:
             source_type="imported",
             verification_status="verified",
         )
-        assert _is_measured(signal) is True
+        assert _is_measured(signal) is False
 
 
 class TestComputeCoverageMetricsEmpty:

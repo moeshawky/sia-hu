@@ -16,9 +16,9 @@ contract-first design that implements it. Status: approved for implementation 20
 | R-07 | Config precedence CLI > env > file > default | `--headroom` beats `CAPTURE_HEADROOM` beats `config.toml headroom` beats `off` (precedence test) |
 | R-08 | Configurable location, no hardcoded paths | `CAPTURE_HEADROOM_DIR` default `{CAPTURE_BASE_PATH}/headroom`; never literal `/root/captures` in code |
 | R-09 | Failure containment | Missing model dir / missing safetensors / OSError → `write_async` returns `None`, never raises, proxy response untouched; OSError suppressed at call site (existing `contextlib.suppress(OSError)` pattern) |
-| R-10 | CPU-only tensor path | `device="cpu"` via `safe_open(..., framework="pt")` + `.float()`; no TPU/XLA import; fp8 dequant via `weight_scale_inv` side tensor when present |
+| R-10 | Tensor read path | Tensors are read from safetensors via `safe_open(..., framework="pt")` + `.float()` to CPU for JSON serialization (carrier side); no TPU/XLA import; fp8 dequant via `weight_scale_inv` side tensor when present. The authority's NFR-01 (accelerator-preferred, CPU fallback) governs where the authority computes on these tensors — see `src/model_headroom/device.py`. |
 
-**NFR-01** (carried from proposal): tensors load to CPU RAM only; vLLM HBM untouched.
+**NFR-01** (carried from proposal, now rewritten): accelerator-preferred weight loading, CPU as fallback — see `src/model_headroom/device.py` (`available_accelerators()`, `default_device()`, `resolve_device()`). The carrier reads tensors to CPU for JSON serialization (R-10 above); the authority computes on the resolved device. vLLM HBM is untouched by the carrier.
 
 ## 2. ADR-001: fire-and-forget task + precomputed deterministic sidecar path
 

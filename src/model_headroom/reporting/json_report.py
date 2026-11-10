@@ -12,8 +12,8 @@ def _signal_to_dict(signal: Any) -> dict[str, Any]:
         "signal_name": signal.signal_name,
         "status": signal.status,
         "duration_seconds": signal.duration_seconds,
-        "source_type": getattr(signal, "source_type", "measured"),
-        "verification_status": getattr(signal, "verification_status", "verified"),
+        "source_type": getattr(signal, "source_type", "unavailable"),
+        "verification_status": getattr(signal, "verification_status", "unavailable"),
     }
     sampling_mode = getattr(signal, "sampling_mode", None)
     if sampling_mode is not None:

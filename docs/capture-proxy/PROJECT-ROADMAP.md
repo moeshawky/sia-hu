@@ -84,6 +84,77 @@ The proxy serves as an observability and routing layer between agent workloads a
 - [ ] Load balance capture for MoE variants via model_headroom `--activations` (requires vLLM `routed_experts` exposure)
 - [ ] Specialization capture via model_headroom `--expert-weights-file` (proxy does not capture expert weights; model_headroom scores R-07)
 
+## Observed Shortcomings — measured 2026-11-07 (end-to-end, ornith-1.5-9b)
+
+Measured on a dense model (`ornith-1.5-9b`) served by vLLM and captured through this proxy with
+`CAPTURE_HEADROOM=all`, `CAPTURE_HEADROOM_WEIGHTS=gate`, `CAPTURE_HEADROOM_MAX_BYTES=64M`.
+Seam inventory: `docs/maintenance/2026-11-07-seams/SEAMS.md`. Items already ranked there are
+cross-referenced, not restated. **Line references are to `HEAD` (`da3e903`)** — the working tree
+carries uncommitted changes that shift them.
+
+### C-1 — `HeadroomRef` advertises artifacts that were never written (REQUIRED — severity corrected)
+
+Measured ref for one capture:
+
+| Ref key | Path | Exists |
+|---|---|---|
+| `effective_rank` | `{capture_id}-weight_pairs.json` | yes |
+| `load_balance` | `{capture_id}.activations.json` | **no** |
+| `specialization` | `{capture_id}-expert_weights.json` | **no** |
+
+The ref is built from `planned_artifacts()` (`headroom.py:973-1016`), which returns a path for every
+**enabled** signal. `app.py:2440-2456` copies those planned paths into `HeadroomRef.signals` before
+the background write is scheduled. The sidecar is built differently — `_write_sync`
+(`headroom.py:1366`) starts from `dict.fromkeys(SIGNAL_KEYS)` and fills a key only when the artifact
+is actually written — so the sidecar says `null` while the ref says a path.
+
+SEAMS.md S-06 rates this SUGGESTION on the assumption that the only failure is a write race
+("sidecar is authoritative, ref may point at a missing file"). The measurement shows a **permanent**
+dangling pointer, not a race: `load_balance` and `specialization` have no producer at all, so those
+files never appear. Severity should be REQUIRED, and the ref should publish only artifacts that
+exist, or mark the rest as planned-but-absent.
+
+### C-2 — Ref `architecture` is structurally always `"unknown"` (REQUIRED)
+
+`HeadroomRef.architecture` defaults to `"unknown"` (`models.py:126`) and the call site
+(`app.py:2449-2456`) never passes it. The sidecar carries the detected value. Measured pair for one
+capture: ref `architecture: "unknown"`, sidecar `architecture: "dense"`. Any consumer reading the
+ref — the append-only record, the one that survives — gets the wrong answer on every capture. `task`
+is `null` on both sides, so architecture is the only field where they disagree.
+
+### C-3 — `CAPTURE_HEADROOM_WEIGHTS=gate` captures an MLP gate under an attention plan (REQUIRED)
+
+`names.py` "attention" templates are BERT/DeBERTa/RoBERTa-only
+(`model.bert.encoder.layer…`, `bert.encoder.layer…`, `deberta.encoder.layer…`,
+`roberta.encoder.layer…`). A decoder-only dense model exposes `model.layers.{i}.self_attn.q_proj`,
+which matches none of them. `_capture_projs` (`headroom.py:89-119`) resolves dense/`gate` as
+`("attention", "gate")` with `fallback_start = 1` — attention is primary, the MoE gate is fallback —
+and its own docstring notes that primary misses are **silent** (`headroom.py:105`). So the miss is
+not reported, and resolution lands on `model.layers.{layer}.mlp.gate_proj.weight`, which is in the
+**gate** family (`names.py:75-76`).
+
+Measured artifact: `layer_name: model.language_model.layers.0.mlp.gate_proj.weight`,
+`parent_shape [12288, 4096]`. The plan said attention, the emitted tensor is an MLP gate. The
+`layer_name` is truthful, so nothing lies — but the *selection* is silently a different module family
+than intended. This is SEAMS.md R-4 / S-02, now with a measured instance.
+
+### C-4 — Byte cap reduces the rank input to a single tile (REQUIRED)
+
+`_tensor_to_bundle` (`headroom.py:646-658`) slices rows to fit `CAPTURE_HEADROOM_MAX_BYTES` before
+conversion and sets `truncated`. At a 64 MB cap a `[12288, 4096]` fp32 tensor fits 4096 of 12288 rows,
+so the authority receives a `4096 × 4096` top-left tile with `sampling_mode=single_tile`. The
+artifact declares this honestly; the defect is that the pipeline accepts a one-tile, one-tensor input
+as a model-level rank. Authority-side consequence is A-3 in the authority roadmap.
+
+### C-5 — Daemon lifecycle does not survive a restart cleanly (OBSERVED, operational)
+
+`--stop` read a PID file that did not match the running daemon, so a restart left two proxies bound
+to the same port and the second exited silently; the daemon's cmdline is
+`python3 -m capture_proxy` (underscore), which `pgrep -f capture-proxy` does not match. Restart
+correctness currently depends on the operator enumerating `ss -lptn` and `/proc/*/cmdline`. Recorded
+because it produced a false "headroom off" state for one restart cycle — an armed `headroom=all`
+proxy stayed alive while the operator believed it had been replaced.
+
 ### EMO-001 — Headroom capture for `allenai/Emo_1b14b_1T` (FIXED 2026-09-27, `80b447f`)
 
 **Ticket:** EMO-001 (ticket doc removed in pre-release sanitization)

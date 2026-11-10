@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from model_headroom.refusal.cli import main
+from model_headroom.refusal.cli import main, parse_args
 from model_headroom.refusal.report import (
     generate_refusal_json,
     generate_refusal_report,
@@ -412,6 +412,19 @@ class TestIsolation:
             check=True,
         )
         assert result.stdout.strip() == "False"
+
+
+class TestDeviceFlag:
+    def test_default_is_auto(self) -> None:
+        """Regression pin: the default --device must be 'auto', not 'cpu'."""
+        assert parse_args([]).device == "auto"
+
+    def test_auto_resolves_to_accelerator_when_available(self) -> None:
+        if not torch.cuda.is_available():
+            pytest.skip("CUDA not available")
+        from model_headroom.device import resolve_device
+
+        assert resolve_device(parse_args([]).device) == "cuda"
 
 
 def test_help_exits_cleanly() -> None:

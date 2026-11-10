@@ -37,34 +37,14 @@ pip install -e ".[dev,headroom,gguf]"   # everything
 
 ---
 
-## Bootstrap (bootstrap.sh)
+## Preflight and publish (sia)
 
 ```bash
-./bootstrap.sh --doctor     # preflight only; changes nothing; exit 0
-./bootstrap.sh              # verify both packages, commit, push, verify
-./bootstrap.sh --dry-run    # prints every git command, executes none
-./bootstrap.sh --no-push    # everything except publish
-./bootstrap.sh --yes        # skip pre-push confirmation
+sia doctor              # read-only workspace preflight; changes nothing; exit 0/1
+sia publish             # push current branch, verify remote ref, never auto-commit
+sia publish --dry-run   # show commands, execute none (skip push + verification)
+sia publish --allow-dirty   # override dirty-tree refusal (no commit, no force-push)
 ```
-
-**Flags:**
-
-| Flag | Effect |
-|------|--------|
-| *(none)* | full run |
-| `--doctor` | preflight only; changes nothing; exit 0 |
-| `--dry-run` | prints every git command, executes none |
-| `--no-push` | everything except publish |
-| `--yes` | skip the pre-push confirmation prompt |
-| `-h`, `--help` | usage |
-
-**Bootstrap steps (idempotent):**
-1. Outer repo — keeps `.git`; `git init` only if absent
-2. Verify the 2 packages — counts tracked files; never clones into them
-3. Write `.gitignore` — appends only missing entries
-4. Stage and report — prints tracked vs ignored with a count
-5. Commit — no commit if nothing staged
-6. Push, then verify — compares remote ref to local `HEAD`
 
 ---
 
@@ -76,8 +56,27 @@ capture-proxy --print-effective-config   # print resolved settings and exit
 capture-proxy --daemon                   # start background instance
 capture-proxy --status                   # show status
 capture-proxy --stop                     # SIGTERM + cleanup
+capture-proxy --sync                     # one-shot sync: run rclone once, then exit
+capture-proxy --sync-daemon              # start sync loop (rclone every --sync-interval seconds)
+capture-proxy --sync-stop                # stop sync daemon loop (SIGTERM + remove sync.pid)
+capture-proxy --sync-status              # show sync daemon status (PID, liveness, log path)
 
 ```
+
+**Sync flags:**
+
+| Flag | Effect |
+|------|--------|
+| `--sync-remote` | Sync destination remote/prefix (default `gdrive:captures`) |
+| `--sync-cmd` | `copy` (default, never deletes) or `sync` (mirror, DELETES) |
+| `--sync-min-age` | Minimum file age to sync; empty disables age filtering |
+| `--sync-interval` | Seconds between loop cycles (default 300) |
+| `--sync-dry-run` / `--no-sync-dry-run` | Dry-run only |
+| `--sync-rclone-opts` | Extra rclone options |
+| `--sync-rclone-binary` | Path to rclone binary (default `rclone`) |
+| `--sync-machine-id` | Sync instance id override |
+| `--sync-pid-file` | Sync daemon PID file |
+| `--sync-log-file` | Sync daemon log file |
 
 ---
 
@@ -98,8 +97,6 @@ capture-proxy --stop                     # SIGTERM + cleanup
 | `CAPTURE_MODEL_ALIASES` | Public→upstream model map as JSON |
 | `CAPTURE_MODEL_TASKS` | Public-model-id → task-type map as JSON |
 | `CAPTURE_BLOB_STORE` | Write bodies to content-addressed store |
-| `GIT_USER` / `GIT_PASS` | Git credential overrides for bootstrap |
-| `OUTER_NAME` / `REMOTE_BASE` | Remote name overrides for bootstrap |
 
 See `reference/env-vars.md` for the complete list.
 

@@ -16,8 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 
-import torch
-
+from model_headroom.device import resolve_device
 from model_headroom.models.types import (
     LayerSelection,
     RefusalDirectionSpec,
@@ -158,8 +157,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--device",
         choices=["auto", "cuda", "cpu"],
-        default="cpu",
-        help="Device for live capture: auto|cuda|cpu (default: cpu)",
+        default="auto",
+        help="Device for live capture: auto uses the first available "
+        "accelerator (cuda preferred), else cpu (default: auto)",
     )
     parser.add_argument(
         "--batch-size",
@@ -350,30 +350,20 @@ def torch_dtype(model_path: str) -> str:
     try:
         with (Path(model_path) / "config.json").open() as handle:
             config = json.load(handle)
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, AttributeError, TypeError):
         return "auto"
     return str(config.get("torch_dtype") or config.get("dtype") or "auto")
 
 
 def _resolve_device(requested: str) -> str | None:
-    """Resolve --device to a usable device string.
+    """Resolve --device to a usable device string via the shared resolver.
 
-    auto -> cuda if available else cpu
+    auto -> first available accelerator (cuda preferred), else cpu
     cuda -> cuda if available else error (None)
     cpu -> cpu
-    Returns None only when cuda was explicitly requested but unavailable.
+    Returns None only when a requested accelerator is unavailable.
     """
-    if requested == "cpu":
-        return "cpu"
-    if requested == "cuda":
-        if torch.cuda.is_available():
-            return "cuda"
-        print(
-            "Error: --device cuda requested but no CUDA device is available",
-            file=sys.stderr,
-        )
-        return None
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    return resolve_device(requested)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -425,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        report = recover_direction_from_weight_deltas(deltas, spec)
+        report = recover_direction_from_weight_deltas(deltas, spec, device=args.device)
     else:
         try:
             loaded = _load_offline(args) or _load_live(args)

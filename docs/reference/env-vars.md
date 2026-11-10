@@ -39,7 +39,9 @@ proposed here.
 ## model_headroom env vars
 
 model_headroom does not declare runtime env vars in its public interface — all
-configuration is via CLI flags. See `reference/cli-flags.md` for the 19 flags.
+configuration is via CLI flags. See `reference/cli-flags.md` for the 20 flags.
+**There is no device-related env var** — `--device {auto,cuda,cpu}` is CLI-only
+(`src/model_headroom/cli.py:162-167`).
 
 ---
 

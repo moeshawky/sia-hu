@@ -288,5 +288,5 @@ def dequantize_ternary(
     # Q2_0 / TQ1_0 / TQ2_0: prefer installed gguf, fall back to Prism adapter.
     try:
         return _gguf_dequantize(blocks, qtype_name)
-    except (AttributeError, NotImplementedError):
+    except (AttributeError, ImportError, NotImplementedError):
         return adapter.dequantize_blocks(blocks)

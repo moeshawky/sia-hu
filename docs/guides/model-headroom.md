@@ -5,7 +5,7 @@ understand signals, read output formats. Cross-references
 `architecture/authority-carrier.md` (authority role), `concepts/headroom-signals.md`
 (R-01 through R-09 reference), `concepts/provenance.md` (measured vs synthetic),
 `concepts/frozen-contracts.md` (frozen dataclasses, NFR-01), and
-`reference/cli-flags.md` (all 19 flags). No Python code changes are proposed here.
+`reference/cli-flags.md` (all 20 flags). No Python code changes are proposed here.
 
 ---
 
@@ -15,7 +15,7 @@ Model Headroom Analyzer — 7 core signals + 2 opt-in gradient diagnostics for
 training headroom on MoE and dense models. Python package, strict types, 21 frozen
 dataclasses, 95% test coverage.
 
-**Version:** 0.2.0 — the authority half of sia-hu. Scores; never proxies.
+**Version:** 0.3.0 — the authority half of sia-hu. Scores; never proxies.
 
 ---
 
@@ -93,7 +93,7 @@ model-headroom --model-name NAME --model-path PATH \
 **Exit codes:** 0 success, 1 error (bad input, unreadable file, analysis failure),
 2 decision-grade not met.
 
-All 19 flags are declared in `src/model_headroom/cli.py:parse_args`.
+All 20 flags are declared in `src/model_headroom/cli.py:parse_args`.
 
 ---
 
@@ -143,8 +143,8 @@ bounds. Decision-grade requires ≥70% measured coverage.
 
 `--model-path` accepts a HuggingFace directory (with `config.json`) or a `.gguf`
 file. Format is auto-detected from the path. GGUF configs are read via
-`models/gguf_loader.py` (requires the `gguf` extra). Weights are extracted to CPU
-RAM by design (NFR-01).
+`models/gguf_loader.py` (requires the `gguf` extra). Weights resolve through
+`src/model_headroom/device.py` — accelerator preferred, CPU as fallback (NFR-01).
 
 ---
 

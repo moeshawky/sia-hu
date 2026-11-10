@@ -149,6 +149,7 @@ def compute_gradient_coherence(
 
 def compute_coherence_for_layer(
     pairs: list[GradientWeightPair],
+    device: str = "cpu",
 ) -> GradientCoherenceReport:
     """Compute cross-batch coherence for ONE named layer/projection.
 
@@ -167,4 +168,6 @@ def compute_coherence_for_layer(
             error_message="need >=2 gradient batches of the same layer",
         )
     names = [p.layer_name for p in pairs]
-    return compute_gradient_coherence([p.gradient for p in pairs], layer_names=names)
+    return compute_gradient_coherence(
+        [p.gradient for p in pairs], layer_names=names, device=device
+    )

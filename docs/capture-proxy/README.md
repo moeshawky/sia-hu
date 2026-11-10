@@ -2,7 +2,7 @@
 
 Capture proxy for llama.cpp, ollama, node-llama-cpp, vLLM, and SGLang — logs raw JSONL of all requests/responses before forwarding. Exposes an **OpenAI-compatible API** so any agent using OpenAI client libraries can route through it transparently.
 
-**Version:** 0.2.0 — **Last Verified:** 2026-09-26 UTC
+**Version:** 0.3.0 — **Last Verified:** 2026-09-26 UTC
 
 ## Quick start
 

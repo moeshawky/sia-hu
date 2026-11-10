@@ -31,8 +31,8 @@ score.
 - `analysis/orchestrator.py` — runs all signals with timing, assembles `HeadroomReport`
 - `analysis/scoring.py` — weighted composite score → [0.0, 1.0]
 - `reporting/json_report.py` and `reporting/human_report.py` — output formats
-- `models/loader.py` and `models/gguf_loader.py` — weight extraction (CPU RAM only, NFR-01)
-- CLI entry `cli.py` — 19 flags, `--analysis-mode decision_grade` (exit 2 if <70% measured coverage)
+- `models/loader.py` and `models/gguf_loader.py` — weight extraction (device resolved via `device.py`: accelerator preferred, CPU fallback)
+- CLI entry `cli.py` — 20 flags, `--analysis-mode decision_grade` (exit 2 if <70% measured coverage)
 
 **Signal ownership (authority side):**
 

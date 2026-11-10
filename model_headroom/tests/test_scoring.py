@@ -17,16 +17,16 @@ from model_headroom.models.types import (
 
 
 class TestScoreSignal:
-    def test_skipped_returns_05(self) -> None:
+    def test_skipped_returns_none(self) -> None:
         signal = SignalResult(
             signal_name="loss_saturation",
             status="skipped",
             data=None,
             duration_seconds=0.0,
         )
-        assert _score_signal(signal) == 0.5
+        assert _score_signal(signal) is None
 
-    def test_error_returns_0(self) -> None:
+    def test_error_returns_none(self) -> None:
         signal = SignalResult(
             signal_name="loss_saturation",
             status="error",
@@ -34,7 +34,7 @@ class TestScoreSignal:
             duration_seconds=0.0,
             error_message="bad",
         )
-        assert _score_signal(signal) == 0.0
+        assert _score_signal(signal) is None
 
     def test_loss_saturation_not_saturated(self) -> None:
         data = SaturationReport(
@@ -158,13 +158,13 @@ class TestScoreSignal:
             data=[],
             duration_seconds=0.0,
         )
-        assert _score_signal(signal) == 0.5
+        assert _score_signal(signal) is None
 
 
 class TestComputeHeadroomScore:
     def test_all_skipped(self, headroom_report_minimal: HeadroomReport) -> None:
         score = compute_headroom_score(headroom_report_minimal)
-        assert score == 0.5
+        assert score == 0.0
 
     def test_score_in_range(self, headroom_report_computed: HeadroomReport) -> None:
         score = compute_headroom_score(headroom_report_computed)
