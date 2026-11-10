@@ -100,7 +100,7 @@ def test_machine_id_fallback_warning(
 def test_no_instance_id_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """All four sources empty -> exit 1 with literal 'no instance id'."""
+    """All four sources empty -> exit 1 with literal 'no sync instance id'."""
     from capture_proxy.__main__ import main
 
     _neutralize_identity(monkeypatch)
@@ -135,7 +135,7 @@ def test_no_instance_id_error(
     )
     assert rc == 1
     err = capfd.readouterr().err
-    assert "no instance id" in err
+    assert "no sync instance id" in err
 
 
 def test_sync_min_age_flag_name() -> None:

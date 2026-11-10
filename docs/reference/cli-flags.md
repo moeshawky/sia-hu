@@ -33,6 +33,25 @@ equivalents). No Python code changes are proposed here.
 | `--pid-file PATH` | Override daemon PID path | — |
 | `--log-file PATH` | Override daemon log path | — |
 
+### capture-proxy sync flags (native `--sync`, replacing removed `rclone-sync-captures.sh`)
+
+| Flag | Purpose | Env equivalent |
+|------|---------|----------------|
+| `--sync` | One-shot sync: run rclone once, then exit | — |
+| `--sync-daemon` | Start sync daemon loop (rclone every `--sync-interval` seconds) | — |
+| `--sync-stop` | Stop sync daemon loop (SIGTERM to its PID, remove sync.pid) | — |
+| `--sync-status` | Show sync daemon status (PID, pid file path) | — |
+| `--sync-remote REMOTE` | Sync destination remote/prefix | `CAPTURE_SYNC_REMOTE` |
+| `--sync-cmd {copy,sync}` | `copy` (default, never deletes) or `sync` (mirror, DELETES) | `CAPTURE_SYNC_CMD` |
+| `--sync-min-age` | Minimum file age to sync; default `60s`, empty disables age filtering | `CAPTURE_SYNC_MIN_AGE` |
+| `--sync-interval SECONDS` | Seconds between sync loop cycles (default `300`) | `CAPTURE_SYNC_INTERVAL` |
+| `--sync-dry-run` / `--no-sync-dry-run` | Dry-run only | `CAPTURE_SYNC_DRY_RUN` |
+| `--sync-rclone-opts OPTS` | Extra rclone options | `CAPTURE_SYNC_RCLONE_OPTS` |
+| `--sync-rclone-binary PATH` | Path to rclone binary (default `rclone`) | `CAPTURE_SYNC_RCLONE_BINARY` |
+| `--sync-machine-id ID` | Sync instance id override | `CAPTURE_SYNC_MACHINE_ID` |
+| `--sync-pid-file PATH` | Sync daemon PID file | `CAPTURE_SYNC_PID_FILE` |
+| `--sync-log-file PATH` | Sync daemon log file | `CAPTURE_SYNC_LOG_FILE` |
+
 Settings resolve in order: **CLI flag > env var > config file > default.**
 
 ---
@@ -79,15 +98,28 @@ Refusal analysis CLI. Entry point: `model-headroom-refusal = "model_headroom.ref
 `sia` has no flags of its own. It dispatches via subcommands:
 
 ```bash
-sia --help                    # lists all three subcommands
+sia --help                    # lists all five subcommands
 sia <subcommand> --help       # shows the underlying CLI's help
-sia capture-proxy <args>      # forwards to capture-proxy main()
-sia model-headroom <args>     # forwards to model-headroom main()
-sia model-headroom-refusal <args>  # forwards to model-headroom-refusal main()
+sia capture-proxy <args>      # forwards to capture_proxy.__main__:main
+sia model-headroom <args>     # forwards to model_headroom.cli:main
+sia model-headroom-refusal <args>   # forwards to model_headroom.refusal.cli:main
+sia doctor <args>             # forwards to sia.doctor:main (read-only preflight)
+sia publish <args>            # forwards to sia.publish:main (push + verify, never auto-commits)
 ```
 
 Exit codes propagate from the underlying CLI. `sia` adds no flags, no behavior,
-no new subcommands beyond the three it aliases.
+no new subcommands beyond the five it dispatches. `doctor` and `publish` are
+`sia`-owned verbs; they do not modify existing CLIs.
+
+| `sia` subcommand | Module | Role |
+|---|---|---|
+| `sia capture-proxy` | `capture_proxy.__main__:main` | Carrier — emits Hu (capture artifacts) |
+| `sia model-headroom` | `model_headroom.cli:main` | Authority — scores Sia (headroom analysis) |
+| `sia model-headroom-refusal` | `model_headroom.refusal.cli:main` | Refusal analysis |
+| `sia doctor` | `sia.doctor:main` | Read-only workspace preflight; exit 0/1/2 |
+| `sia publish` | `sia.publish:main` | Push current branch; verify remote ref matches local HEAD; never auto-commits; `--dry-run`/`--allow-dirty`; credential URLs redacted |
+
+`sia doctor` takes no flags. `sia publish` takes `--dry-run` and `--allow-dirty`.
 
 ---
 

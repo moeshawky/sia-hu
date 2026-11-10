@@ -456,9 +456,10 @@ def _parse_bool(value: str, env_name: str) -> bool:
         return False
     flag_name = env_name[len("CAPTURE_") :].lower().replace("_", "-")
     raise ValueError(
-        f"error: --{flag_name} must be true/false/1/0/yes/no/on/off "
-        f"(got: {value}) — valid example: {env_name}=false "
-        "capture-proxy --sync"
+        f"error: invalid boolean value for --{flag_name}\n"
+        f"  Cause:  value '{value}' is not a valid boolean\n"
+        "  Action: Pass true/false/1/0/yes/no/on/off\n"
+        "  Exit:   2"
     )
 
 
@@ -739,22 +740,31 @@ def main(args: list[str] | None = None) -> int:
     if any(sync_action_flags):
         if sum(1 for f in sync_action_flags if f) != 1:
             print(
-                "error: exactly one of --sync, --sync-daemon, --sync-stop, "
-                "--sync-status may be set",
+                "error: multiple sync action flags set\n"
+                "  Cause:  more than one of --sync, --sync-daemon, --sync-stop,\n"
+                "          --sync-status was set\n"
+                "  Action: Pass exactly one sync action flag\n"
+                "  Exit:   2",
                 file=sys.stderr,
             )
             return 2
         if any(proxy_action_flags):
             print(
-                "error: --sync/--sync-daemon/--sync-stop/--sync-status is "
-                "mutually exclusive with --daemon/--stop/--status",
+                "error: sync action flag combined with proxy action flag\n"
+                "  Cause:  --sync/--sync-daemon/--sync-stop/--sync-status was combined\n"
+                "          with --daemon/--stop/--status\n"
+                "  Action: Use only one group of flags\n"
+                "  Exit:   2",
                 file=sys.stderr,
             )
             return 2
         if parsed.print_effective_config:
             print(
-                "error: --print-effective-config cannot be combined with "
-                "--sync/--sync-daemon/--sync-stop/--sync-status",
+                "error: --print-effective-config combined with sync flag\n"
+                "  Cause:  --print-effective-config cannot be combined with\n"
+                "          --sync/--sync-daemon/--sync-stop/--sync-status\n"
+                "  Action: Omit --print-effective-config when using a sync action flag\n"
+                "  Exit:   2",
                 file=sys.stderr,
             )
             return 2
@@ -802,7 +812,13 @@ def main(args: list[str] | None = None) -> int:
     )
     port = int(_resolve_setting(parsed.port, "CAPTURE_PORT", config, _DEFAULT_PORT))
     if not (0 <= port <= 65535):
-        print(f"error: port {port} is out of range (0-65535)", file=sys.stderr)
+        print(
+            "error: port out of range\n"
+            f"  Cause:  port {port} is not in the valid range 0-65535\n"
+            "  Action: Pass a port between 0 and 65535\n"
+            "  Exit:   2",
+            file=sys.stderr,
+        )
         return 2
     host = _resolve_setting(parsed.host, "CAPTURE_HOST", config, _DEFAULT_HOST)
     headroom = _resolve_setting(parsed.headroom, "CAPTURE_HEADROOM", config, "off")
@@ -971,10 +987,11 @@ def main(args: list[str] | None = None) -> int:
     )
     if not instance_id:
         print(
-            "error: no instance id — --sync-machine-id, CAPTURE_MACHINE_ID, "
-            "config machine_id, hostname, and /etc/machine-id are all empty; "
-            "set one — valid example: CAPTURE_MACHINE_ID=prod-box-1 "
-            "capture-proxy --sync",
+            "error: no sync instance id\n"
+            "  Cause:  --sync-machine-id, CAPTURE_MACHINE_ID, config machine_id,\n"
+            "          hostname, and /etc/machine-id are all empty\n"
+            "  Action: Set CAPTURE_MACHINE_ID or pass --sync-machine-id\n"
+            "  Exit:   1",
             file=sys.stderr,
         )
         return 1
@@ -991,12 +1008,12 @@ def main(args: list[str] | None = None) -> int:
         )
     if sync_cmd == "sync" and not explicit:
         print(
-            "error: --sync-cmd sync requires an explicit instance id you own "
-            "alone; derived id "
-            f"{instance_id} from hostname or /etc/machine-id is not safe for "
-            "a destructive mirror — set CAPTURE_MACHINE_ID or pass "
-            "--sync-machine-id — valid example: CAPTURE_MACHINE_ID=my-dev-box "
-            "capture-proxy --sync-cmd sync",
+            "error: --sync-cmd sync requires an explicit instance id\n"
+            "  Cause:  instance id was derived from hostname or /etc/machine-id;\n"
+            "          those are shared across instances and unsafe for a\n"
+            "          destructive mirror\n"
+            "  Action: Set CAPTURE_MACHINE_ID or pass --sync-machine-id\n"
+            "  Exit:   1",
             file=sys.stderr,
         )
         return 1

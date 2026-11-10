@@ -286,7 +286,7 @@ class TestLivePath:
         )
         err = capsys.readouterr().err
         assert rc == 1
-        assert "Error loading model:" in err
+        assert "error: loading model" in err
         assert "does not exist" not in err
         assert "expects a HuggingFace model directory" not in err
         assert "no config.json" not in err

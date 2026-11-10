@@ -323,22 +323,40 @@ def main(argv: list[str] | None = None) -> int:
             args.expert_weights_file = str(downloaded["expert_weights"])
     elif args.model_name is None or args.model_path is None:
         print(
-            "Error: either --model-id or both --model-name and --model-path are required",
+            "error: model id or model name+path required\n"
+            "  Cause:  neither --model-id nor both --model-name and --model-path were provided\n"
+            "  Action: Pass --model-id or both --model-name and --model-path\n"
+            "  Exit:   1",
             file=sys.stderr,
         )
         return 1
 
     # Validate model-path: non-empty, exists, and is a directory (F-005, F-007, F-008)
     if not args.model_path:
-        print("Error: --model-path must not be empty", file=sys.stderr)
+        print(
+            "error: --model-path must not be empty\n"
+            "  Cause:  --model-path value is empty\n"
+            "  Action: Pass a non-empty model path\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
         return 1
     model_path_obj = Path(args.model_path)
     if not model_path_obj.exists():
-        print(f"Error: --model-path does not exist: {args.model_path}", file=sys.stderr)
+        print(
+            "error: --model-path does not exist\n"
+            f"  Cause:  path does not exist: {args.model_path}\n"
+            "  Action: Pass an existing model path\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
         return 1
     if model_path_obj.suffix != ".gguf" and not model_path_obj.is_dir():
         print(
-            f"Error: --model-path is not a directory: {args.model_path}",
+            "error: --model-path is not a directory\n"
+            f"  Cause:  path is not a directory and does not end in .gguf: {args.model_path}\n"
+            "  Action: Pass a directory or a .gguf file\n"
+            "  Exit:   1",
             file=sys.stderr,
         )
         return 1
@@ -355,7 +373,13 @@ def main(argv: list[str] | None = None) -> int:
                 data = json.load(f)
             loss_curve = [LossDataPoint(**pt) for pt in data]
         except Exception as e:
-            print(f"Error loading loss curve: {e}", file=sys.stderr)
+            print(
+                "error: loading loss curve\n"
+                f"  Cause:  {e}\n"
+                "  Action: Check the loss curve JSON file\n"
+                "  Exit:   1",
+                file=sys.stderr,
+            )
             return 1
 
     if args.isoflop:
@@ -366,7 +390,13 @@ def main(argv: list[str] | None = None) -> int:
                 data = json.load(f)
             isoflop_points = [IsoFLOPPoint(**pt) for pt in data]
         except Exception as e:
-            print(f"Error loading isoFLOP data: {e}", file=sys.stderr)
+            print(
+                "error: loading isoFLOP data\n"
+                f"  Cause:  {e}\n"
+                "  Action: Check the isoFLOP JSON file\n"
+                "  Exit:   1",
+                file=sys.stderr,
+            )
             return 1
 
     if args.activations:
@@ -458,7 +488,13 @@ def main(argv: list[str] | None = None) -> int:
                 raw: dict[str, Any] = json.load(f)
             parent_shapes = {k: (int(v[0]), int(v[1])) for k, v in raw.items()}
         except Exception as e:
-            print(f"Error loading parent shapes: {e}", file=sys.stderr)
+            print(
+                "error: loading parent shapes\n"
+                f"  Cause:  {e}\n"
+                "  Action: Check the parent shapes JSON file\n"
+                "  Exit:   1",
+                file=sys.stderr,
+            )
             return 1
 
     gradient_provenance = None
@@ -547,7 +583,13 @@ def main(argv: list[str] | None = None) -> int:
             device=device,
         )
     except Exception as e:
-        print(f"Analysis failed: {e}", file=sys.stderr)
+        print(
+            "error: analysis failed\n"
+            f"  Cause:  {e}\n"
+            "  Action: Check model path and signal files\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
         return 1
     finally:
         if temp_config_dir is not None:
@@ -582,7 +624,13 @@ def main(argv: list[str] | None = None) -> int:
                 raise
         except OSError as e:
             # Clean error instead of raw traceback (F-004)
-            print(f"Error writing report to {args.output_file}: {e}", file=sys.stderr)
+            print(
+                "error: writing report\n"
+                f"  Cause:  {e}\n"
+                "  Action: Check output path permissions\n"
+                "  Exit:   1",
+                file=sys.stderr,
+            )
             return 1
         print(f"Report written to {args.output_file}", file=sys.stderr)
     else:

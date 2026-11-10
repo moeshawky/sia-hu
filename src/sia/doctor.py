@@ -94,7 +94,12 @@ def main(args: list[str] | None = None) -> int:
 
     # 1. git on PATH
     if shutil.which("git") is None:
-        error("git not found on PATH — install git — run: apt-get install git")
+        error(
+            "git not found on PATH\n"
+            "  Cause:  git executable not found on PATH\n"
+            "  Action: Install git (e.g. apt-get install git)\n"
+            "  Exit:   1"
+        )
     else:
         rc, ver, _ = _git(["--version"])
         ok(f"git {ver if ver else 'available'}")
@@ -103,7 +108,10 @@ def main(args: list[str] | None = None) -> int:
     cwd_name = Path.cwd().name
     if cwd_name in ("capture-proxy", "model_headroom"):
         error(
-            f"refusing: already inside a package dir ({cwd_name}); cd to the parent — run: cd .."
+            "refusing: already inside a package dir\n"
+            f"  Cause:  cwd is inside package dir ({cwd_name})\n"
+            "  Action: cd to the parent — run: cd ..\n"
+            "  Exit:   1"
         )
     else:
         ok(f"cwd {Path.cwd()} is repo root")
@@ -111,18 +119,33 @@ def main(args: list[str] | None = None) -> int:
     # 3. repo root and branch
     rc, root, _ = _git(["rev-parse", "--show-toplevel"])
     if rc != 0:
-        error("not a git repository — run: git init")
+        error(
+            "not a git repository\n"
+            "  Cause:  current directory is not inside a git repository\n"
+            "  Action: Run git init to initialize a repository\n"
+            "  Exit:   1"
+        )
     else:
         rc2, branch, _ = _git(["symbolic-ref", "--short", "HEAD"])
         if rc2 != 0:
-            error("not on a branch (detached HEAD) — run: git checkout -b <branch>")
+            error(
+                "not on a branch (detached HEAD)\n"
+                "  Cause:  HEAD is detached — not on a branch\n"
+                "  Action: Create and checkout a branch — run: git checkout -b <branch>\n"
+                "  Exit:   1"
+            )
         else:
             ok(f"repo root {root}, branch {branch}")
 
     # 4. remote origin resolvable
     rc, url, _ = _git(["remote", "get-url", "origin"])
     if rc != 0:
-        error("no origin remote; add one — run: git remote add origin <url>")
+        error(
+            "no origin remote\n"
+            "  Cause:  no remote named 'origin' configured\n"
+            "  Action: Add one — run: git remote add origin <url>\n"
+            "  Exit:   1"
+        )
     else:
         ok(f"remote origin {_redact(url)}")
 
@@ -130,7 +153,12 @@ def main(args: list[str] | None = None) -> int:
     repo_root = Path.cwd()
     pyproject = repo_root / "pyproject.toml"
     if not pyproject.is_file():
-        error("root pyproject.toml missing — run from the repo root")
+        error(
+            "root pyproject.toml missing\n"
+            "  Cause:  pyproject.toml not found in current directory\n"
+            "  Action: Run from the repo root\n"
+            "  Exit:   1"
+        )
     else:
         missing_inits = [
             pkg
@@ -139,8 +167,10 @@ def main(args: list[str] | None = None) -> int:
         ]
         if missing_inits:
             error(
-                f"{', '.join(missing_inits)} missing or untracked — a release checkout "
-                "must carry all three packages — run: git checkout -- capture-proxy model_headroom src"
+                "{names} missing or untracked\n"
+                "  Cause:  {names} package __init__.py files are missing or untracked\n"
+                "  Action: Restore them — run: git checkout -- capture-proxy model_headroom src\n"
+                "  Exit:   1".format(names=", ".join(missing_inits))
             )
         else:
             ok("capture-proxy present — tracked package")
@@ -148,7 +178,12 @@ def main(args: list[str] | None = None) -> int:
         try:
             data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
         except tomllib.TOMLDecodeError as exc:
-            error(f"invalid TOML in root pyproject.toml: {exc} — fix the TOML syntax")
+            error(
+                "invalid TOML in root pyproject.toml\n"
+                f"  Cause:  {exc}\n"
+                "  Action: Fix the TOML syntax\n"
+                "  Exit:   1"
+            )
             data = {}
         packages = (
             data.get("tool", {})
@@ -161,8 +196,10 @@ def main(args: list[str] | None = None) -> int:
         missing_packages = [p for p in _WHEEL_PACKAGES if p not in packages]
         if missing_packages:
             error(
-                f"{', '.join(missing_packages)} missing from wheel packages list in "
-                "root pyproject.toml — run: edit pyproject.toml"
+                "{names} missing from wheel packages list\n"
+                "  Cause:  {names} not listed in wheel packages in root pyproject.toml\n"
+                "  Action: Add them — run: edit pyproject.toml\n"
+                "  Exit:   1".format(names=", ".join(missing_packages))
             )
 
     # 6. capture-proxy config path and parse validity (read-only, never overwrites)
@@ -174,15 +211,22 @@ def main(args: list[str] | None = None) -> int:
             ok(f"config {_CONFIG_PATH} valid TOML")
         except tomllib.TOMLDecodeError as exc:
             error(
-                f"invalid TOML in config {_CONFIG_PATH}: {exc} — fix the TOML "
-                "syntax, or move the file aside and run capture-proxy --ensure-config "
-                "(it never overwrites an existing file)"
+                "invalid TOML in config\n"
+                f"  Cause:  {exc}\n"
+                "  Action: Fix the TOML syntax, or move the file aside and run "
+                "capture-proxy --ensure-config (it never overwrites an existing file)\n"
+                "  Exit:   1"
             )
 
     # 7. verify-chain tools available (probe only — never execute)
     for tool in ("ruff", "mypy", "pytest"):
         if shutil.which(tool) is None:
-            error(f"{tool} not found on PATH — run: uv sync --extra dev")
+            error(
+                f"{tool} not found on PATH\n"
+                f"  Cause:  {tool} executable not found on PATH\n"
+                "  Action: Install dev dependencies — run: uv sync --extra dev\n"
+                "  Exit:   1"
+            )
         else:
             version = _tool_version(tool)
             ok(f"{tool} {version if version else 'available'}")

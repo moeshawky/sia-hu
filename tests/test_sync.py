@@ -437,7 +437,7 @@ def test_sync_daemon_start_in_progress_message(tmp_path: Path, capsys) -> None:
 
     assert rc == 1
     captured = capsys.readouterr()
-    assert "another sync daemon start is in progress" in captured.err
+    assert "sync daemon start in progress" in captured.err
 
 
 def test_sync_stop_removes_pid(tmp_path: Path) -> None:

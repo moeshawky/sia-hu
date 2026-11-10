@@ -62,8 +62,10 @@ def main(args: list[str] | None = None) -> int:
     dirty = bool(proc.stdout.strip())
     if dirty and not parsed.allow_dirty:
         print(
-            "error: working tree is dirty; commit or stash first, or use "
-            "--allow-dirty to override — run: git status --short",
+            "error: working tree is dirty\n"
+            "  Cause:  uncommitted changes in working tree\n"
+            "  Action: Commit or stash first, or use --allow-dirty to override\n"
+            "  Exit:   1",
             file=sys.stderr,
         )
         return 1
@@ -77,7 +79,10 @@ def main(args: list[str] | None = None) -> int:
     proc = _git(["symbolic-ref", "--short", "HEAD"])
     if proc.returncode != 0:
         print(
-            "error: detached HEAD; checkout a branch first — run: git checkout -b <branch>",
+            "error: detached HEAD\n"
+            "  Cause:  HEAD is detached — not on a branch\n"
+            "  Action: Checkout a branch first — run: git checkout -b <branch>\n"
+            "  Exit:   1",
             file=sys.stderr,
         )
         return 1
@@ -87,7 +92,10 @@ def main(args: list[str] | None = None) -> int:
     proc = _git(["remote", "get-url", "origin"])
     if proc.returncode != 0:
         print(
-            "error: no origin remote; add one — run: git remote add origin <url>",
+            "error: no origin remote\n"
+            "  Cause:  no remote named 'origin' configured\n"
+            "  Action: Add one — run: git remote add origin <url>\n"
+            "  Exit:   1",
             file=sys.stderr,
         )
         return 1
@@ -101,7 +109,13 @@ def main(args: list[str] | None = None) -> int:
         proc = _git(push_cmd)
         if proc.returncode != 0:
             message = proc.stderr.strip() or proc.stdout.strip()
-            print(f"error: push failed — {message}", file=sys.stderr)
+            print(
+                "error: push failed\n"
+                f"  Cause:  {message}\n"
+                "  Action: Check remote connectivity and permissions\n"
+                "  Exit:   1",
+                file=sys.stderr,
+            )
             return 1
 
     if parsed.dry_run:
@@ -115,9 +129,12 @@ def main(args: list[str] | None = None) -> int:
     remote_sha = remote_lines[0].split()[0] if remote_lines else ""
     if not remote_sha or remote_sha != local_sha:
         print(
-            "error: push verification failed — local HEAD "
-            f"{local_sha} != remote refs/heads/{branch} "
-            f"{remote_sha or '<absent>'}; re-run sia publish",
+            "error: push verification failed\n"
+            "  Cause:  local HEAD {local_sha} != remote refs/heads/{branch} ({remote_sha})\n"
+            "  Action: Re-run sia publish\n"
+            "  Exit:   1".format(
+                local_sha=local_sha, branch=branch, remote_sha=remote_sha or "<absent>"
+            ),
             file=sys.stderr,
         )
         return 1

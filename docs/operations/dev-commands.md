@@ -59,7 +59,7 @@ capture-proxy --stop                     # SIGTERM + cleanup
 capture-proxy --sync                     # one-shot sync: run rclone once, then exit
 capture-proxy --sync-daemon              # start sync loop (rclone every --sync-interval seconds)
 capture-proxy --sync-stop                # stop sync daemon loop (SIGTERM + remove sync.pid)
-capture-proxy --sync-status              # show sync daemon status (PID, liveness, log path)
+capture-proxy --sync-status              # show sync daemon status (PID, pid file path)
 
 ```
 
@@ -69,7 +69,7 @@ capture-proxy --sync-status              # show sync daemon status (PID, livenes
 |------|--------|
 | `--sync-remote` | Sync destination remote/prefix (default `gdrive:captures`) |
 | `--sync-cmd` | `copy` (default, never deletes) or `sync` (mirror, DELETES) |
-| `--sync-min-age` | Minimum file age to sync; empty disables age filtering |
+| `--sync-min-age` | Minimum file age to sync; default `60s`, empty disables age filtering |
 | `--sync-interval` | Seconds between loop cycles (default 300) |
 | `--sync-dry-run` / `--no-sync-dry-run` | Dry-run only |
 | `--sync-rclone-opts` | Extra rclone options |
