@@ -123,6 +123,7 @@ class TestRecoveryDevice:
         assert report.direction.device.type == "cpu"
         assert abs(abs(float(report.direction @ truth)) - 1.0) < 1e-4
 
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
     def test_svd_executes_on_requested_device(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
