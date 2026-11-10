@@ -22,6 +22,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: uv sync --extra dev --extra headroom --extra gguf
+      - name: Install rclone
+        run: |
+          curl https://rclone.org/install.sh | sudo bash
       - name: Lint
         run: uv run ruff check .
       - name: Format check
