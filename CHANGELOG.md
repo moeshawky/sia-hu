@@ -10,9 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] - 2026-11-10
 
 ### Added
-- `capture-proxy --sync` (one-shot), `--sync-daemon`, `--sync-stop`, `--sync-status` — native off-box capture sync via rclone subprocess; no new Python dependency, no restored shell scripts. Settings flags: `--sync-remote`, `--sync-cmd` (default `copy`), `--sync-min-age`, `--sync-interval`, `--sync-dry-run`, `--sync-rclone-opts`, `--sync-rclone-binary`, `--sync-machine-id`, `--sync-pid-file`, `--sync-log-file`.
-- `sia doctor` — read-only workspace preflight; every failure names its fix command; exit 0/1.
+- `capture-proxy --sync` (one-shot), `--sync-daemon`, `--sync-stop`, `--sync-status` — native off-box capture sync via rclone subprocess; no new runtime Python dependency (pure stdlib), no restored shell scripts. New optional `env` extra (`wrapt>=1.16`) for Kaggle self-healing; not in `[project].dependencies`. Settings flags: `--sync-remote`, `--sync-cmd` (default `copy`), `--sync-min-age` (default `60s`), `--sync-interval` (default `300`), `--sync-dry-run`, `--sync-rclone-opts`, `--sync-rclone-binary`, `--sync-machine-id`, `--sync-pid-file`, `--sync-log-file`.
+- `sia doctor` — read-only workspace preflight; every failure names its fix command; exit 0/1/2 (2 on flag errors).
 - `sia publish` — push current branch and verify the remote ref matches local HEAD; never auto-commits; `--dry-run` / `--allow-dirty`; credential URLs redacted in output.
+
+### Changed
+- Version bumped `0.3.0` → `0.4.0` (`pyproject.toml`).
+- `pytest testpaths` extended to include root `tests/`; `sia` added to coverage `source`.
+
+### Removed
+- `rclone-sync-captures.sh`, `bootstrap-capture.sh`, `bootstrap.sh` shell scripts — replaced by native `capture-proxy --sync*` flags and `sia doctor`/`sia publish` verbs.
 
 ## [0.3.0] - 2026-11-10
 

@@ -86,7 +86,7 @@ def test_publish_dirty_tree_refused(
     assert rc == 1
     err = capsys.readouterr().err
     assert "working tree is dirty" in err
-    assert "git status --short" in err
+    assert "Commit or stash first, or use --allow-dirty to override" in err
     assert not any(c[1:3] == ["push"] for c in fake_git.commands)
 
 

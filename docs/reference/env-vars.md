@@ -28,6 +28,16 @@ proposed here.
 | `CAPTURE_ROUTED_EXPERTS_SHAPE` | *(unset)* | `LxK` tensor shape for decoding; `on` without valid shape warns and stays off |
 | `CAPTURE_ROUTED_EXPERTS_DIR` | `{base_path}/routing` | Routing sidecar root |
 | `CAPTURE_BLOB_STORE` | `on` | Write request/message bodies to `{base_path}/blobs/sha256/` so hashes resolve. `off` keeps hashing but stops writing |
+| `CAPTURE_SYNC_REMOTE` | `gdrive:captures` | Sync destination remote/prefix. TOML `sync_remote` table; `--sync-remote` flag |
+| `CAPTURE_SYNC_CMD` | `copy` | Sync command: `copy` (default, never deletes) or `sync` (mirror, DELETES remote files absent locally). TOML `sync_cmd` table; `--sync-cmd` flag |
+| `CAPTURE_SYNC_MIN_AGE` | `60s` | Minimum age of files to sync; empty disables age filtering. TOML `sync_min_age` table; `--sync-min-age` flag |
+| `CAPTURE_SYNC_INTERVAL` | `300` | Seconds between sync loop cycles. TOML `sync_interval` table; `--sync-interval` flag |
+| `CAPTURE_SYNC_DRY_RUN` | `off` | Dry-run: pass `--dry-run` to rclone without transferring. TOML `sync_dry_run` table; `--sync-dry-run`/`--no-sync-dry-run` flag |
+| `CAPTURE_SYNC_RCLONE_OPTS` | *(unset)* | Extra rclone options as a shell-quoted string. TOML `sync_rclone_opts` table; `--sync-rclone-opts` flag |
+| `CAPTURE_SYNC_RCLONE_BINARY` | `rclone` | Path to rclone binary. TOML `sync_rclone_binary` table; `--sync-rclone-binary` flag |
+| `CAPTURE_SYNC_MACHINE_ID` | *(hostname)* | Sync instance id; may be overridden by `--sync-machine-id`. TOML `machine_id` table; `--sync-machine-id` flag |
+| `CAPTURE_SYNC_PID_FILE` | `~/.cache/capture-proxy/sync.pid` | Sync daemon PID file. TOML `sync_pid_file` table; `--sync-pid-file` flag |
+| `CAPTURE_SYNC_LOG_FILE` | `~/.cache/capture-proxy/sync.log` | Sync daemon log file. TOML `sync_log_file` table; `--sync-log-file` flag |
 
 **Headroom eligibility:** covers `chat`, `completion`, `classification`, `image`.
 **Excluded:** `embeddings`, `rerank`.

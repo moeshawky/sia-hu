@@ -210,7 +210,13 @@ def _load_offline(
     harmful = load_residual_batches_from_json(args.harmful_activations)
     harmless = load_residual_batches_from_json(args.harmless_activations)
     if harmful is None or harmless is None:
-        print("Error loading activations from JSON", file=sys.stderr)
+        print(
+            "error: loading activations from JSON\n"
+            "  Cause:  failed to load harmful or harmless activations\n"
+            "  Action: Check the JSON files are valid\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
         return None
     return (harmful, harmless)
 
@@ -246,16 +252,23 @@ def _load_live(
     harmful_prompts = load_prompts(args.harmful_prompts)
     harmless_prompts = load_prompts(args.harmless_prompts)
     if harmful_prompts is None or harmless_prompts is None:
-        print("Error loading prompt sets", file=sys.stderr)
+        print(
+            "error: loading prompt sets\n"
+            "  Cause:  failed to load harmful or harmless prompts\n"
+            "  Action: Check the prompt files\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
         return None
 
     try:
         from transformers import AutoTokenizer
     except ImportError:
         print(
-            "Error: live capture requires transformers, which is not a "
-            "declared dependency. Install it, or use --harmful-activations "
-            "with pre-captured tensors.",
+            "error: live capture requires transformers\n"
+            "  Cause:  transformers is not a declared dependency\n"
+            "  Action: Install it, or use --harmful-activations with pre-captured tensors\n"
+            "  Exit:   1",
             file=sys.stderr,
         )
         return None
@@ -286,18 +299,30 @@ def _load_live(
                 model = None
         if model is None:
             print(
-                "Error loading model: " + "; ".join(load_errors),
+                "error: loading model\n"
+                "  Cause:  failed to load model with available loaders\n"
+                "  Action: Check the model path and try a different loader\n"
+                "  Exit:   1",
                 file=sys.stderr,
             )
             return None
     except (OSError, ValueError) as exc:
-        print(f"Error loading model: {exc}", file=sys.stderr)
+        print(
+            "error: loading model\n"
+            f"  Cause:  {exc}\n"
+            "  Action: Check the model path\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
         return None
 
     discovered = discover_residual_layers(model)
     if not discovered:
         print(
-            "Error: no decoder layer stack discovered in this model",
+            "error: no decoder layer stack discovered\n"
+            "  Cause:  no decoder layer stack found in this model\n"
+            "  Action: Check the model architecture\n"
+            "  Exit:   1",
             file=sys.stderr,
         )
         return None
@@ -338,7 +363,13 @@ def _load_live(
         position=args.position,
     )
     if harmful is None or harmless is None:
-        print("Error: live capture produced no activations", file=sys.stderr)
+        print(
+            "error: live capture produced no activations\n"
+            "  Cause:  capture returned None for harmful or harmless residuals\n"
+            "  Action: Check model, tokenizer, and prompts\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
         return None
     return (list(harmful.values()), list(harmless.values()))
 
@@ -378,15 +409,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.sglang_url:
         if not (args.harmful_prompts and args.harmless_prompts):
             print(
-                "Error: --sglang-url also needs --harmful-prompts and "
-                "--harmless-prompts",
+                "error: --sglang-url needs prompt sets\n"
+                "  Cause:  --sglang-url requires --harmful-prompts and --harmless-prompts\n"
+                "  Action: Provide both prompt files\n"
+                "  Exit:   1",
                 file=sys.stderr,
             )
             return 1
         harmful_prompts = load_prompts(args.harmful_prompts)
         harmless_prompts = load_prompts(args.harmless_prompts)
         if harmful_prompts is None or harmless_prompts is None:
-            print("Error loading prompt sets", file=sys.stderr)
+            print(
+                "error: loading prompt sets\n"
+                "  Cause:  failed to load harmful or harmless prompts\n"
+                "  Action: Check the prompt files\n"
+                "  Exit:   1",
+                file=sys.stderr,
+            )
             return 1
         served = args.sglang_model or "default"
         harmful_batches = capture_residuals_sglang(
@@ -397,8 +436,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         if harmful_batches is None or harmless_batches is None:
             print(
-                "Error: sglang returned no hidden states. The server must run "
-                "with --enable-return-hidden-states.",
+                "error: sglang returned no hidden states\n"
+                "  Cause:  sglang server did not return hidden states\n"
+                "  Action: Run sglang server with --enable-return-hidden-states\n"
+                "  Exit:   1",
                 file=sys.stderr,
             )
             return 1
@@ -411,7 +452,10 @@ def main(argv: list[str] | None = None) -> int:
         deltas = load_weight_deltas_from_json(args.weight_deltas)
         if deltas is None:
             print(
-                f"Error loading weight deltas from {args.weight_deltas}",
+                "error: loading weight deltas\n"
+                f"  Cause:  failed to load weight deltas from {args.weight_deltas}\n"
+                "  Action: Check the JSON file\n"
+                "  Exit:   1",
                 file=sys.stderr,
             )
             return 1
@@ -420,15 +464,24 @@ def main(argv: list[str] | None = None) -> int:
         try:
             loaded = _load_offline(args) or _load_live(args)
         except _ModelPathError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
+            print(
+                "error: model path error\n"
+                f"  Cause:  {exc}\n"
+                "  Action: Check the model path\n"
+                "  Exit:   1",
+                file=sys.stderr,
+            )
             return 1
         if loaded is None:
             print(
-                "Error: provide one acquisition path — "
-                "--harmful-activations + --harmless-activations, "
-                "--model-path + --harmful-prompts + --harmless-prompts, "
-                "--sglang-url + --harmful-prompts + --harmless-prompts, "
-                "or --weight-deltas",
+                "error: no acquisition path provided\n"
+                "  Cause:  no input source specified\n"
+                "  Action: Provide one of:\n"
+                "    --harmful-activations + --harmless-activations\n"
+                "    --model-path + --harmful-prompts + --harmless-prompts\n"
+                "    --sglang-url + --harmful-prompts + --harmless-prompts\n"
+                "    --weight-deltas\n"
+                "  Exit:   1",
                 file=sys.stderr,
             )
             return 1
@@ -436,10 +489,22 @@ def main(argv: list[str] | None = None) -> int:
         report = compute_refusal_direction(harmful, harmless, spec)
 
     if report.direction_status == "error":
-        print(f"Error: {report.error_message}", file=sys.stderr)
+        print(
+            "error: refusal computation\n"
+            "  Cause:  {report.error_message}\n"
+            "  Action: Check model and inputs\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
         return 1
     if report.direction is None:
-        print(f"Error: {report.error_message}", file=sys.stderr)
+        print(
+            "error: refusal computation\n"
+            "  Cause:  {report.error_message}\n"
+            "  Action: Check model and inputs\n"
+            "  Exit:   2",
+            file=sys.stderr,
+        )
         return 2
 
     output = (

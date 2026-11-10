@@ -28,44 +28,56 @@ import time
 from pathlib import Path
 
 _RCLONE_MISSING_TEMPLATE = (
-    "error: rclone binary {binary} not found on PATH; install rclone "
-    "(https://rclone.org/install/) or set CAPTURE_SYNC_RCLONE_BINARY to a valid "
-    "path — valid example: CAPTURE_SYNC_RCLONE_BINARY=/usr/local/bin/rclone "
-    "capture-proxy --sync"
+    "error: rclone binary not found on PATH\n"
+    "  Cause:  rclone is not installed or not on PATH\n"
+    "  Action: Install rclone (https://rclone.org/install/) or set\n"
+    "          CAPTURE_SYNC_RCLONE_BINARY to a valid path\n"
+    "  Exit:   2"
 )
 
 _SYNC_CMD_INVALID_TEMPLATE = (
-    "error: --sync-cmd must be 'copy' or 'sync' (got: {value}) — valid "
-    "example: --sync-cmd copy"
+    "error: invalid --sync-cmd value\n"
+    "  Cause:  --sync-cmd must be 'copy' or 'sync'\n"
+    "  Action: Pass --sync-cmd copy or --sync-cmd sync\n"
+    "  Exit:   2"
 )
 
 _INTERVAL_INVALID_TEMPLATE = (
-    "error: --sync-interval must be a positive whole number of seconds "
-    "(got: {value}) — valid example: --sync-interval 300"
+    "error: invalid --sync-interval value\n"
+    "  Cause:  --sync-interval must be a positive whole number of seconds\n"
+    "  Action: Pass --sync-interval 300 (seconds)\n"
+    "  Exit:   2"
 )
 
 _NO_INSTANCE_ID_TEMPLATE = (
-    "error: no instance id — --sync-machine-id, CAPTURE_MACHINE_ID, config "
-    "machine_id, hostname, and /etc/machine-id are all empty; set one — valid "
-    "example: CAPTURE_MACHINE_ID=prod-box-1 capture-proxy --sync"
+    "error: no sync instance id\n"
+    "  Cause:  --sync-machine-id, CAPTURE_MACHINE_ID, config machine_id,\n"
+    "          hostname, and /etc/machine-id are all empty\n"
+    "  Action: Set CAPTURE_MACHINE_ID or pass --sync-machine-id\n"
+    "  Exit:   1"
 )
 
 _SYNC_CMD_SYNC_DERIVED_TEMPLATE = (
-    "error: --sync-cmd sync requires an explicit instance id you own alone; "
-    "derived id {id} from hostname or /etc/machine-id is not safe for a "
-    "destructive mirror — set CAPTURE_MACHINE_ID or pass --sync-machine-id — "
-    "valid example: CAPTURE_MACHINE_ID=my-dev-box capture-proxy --sync-cmd sync"
+    "error: --sync-cmd sync requires an explicit instance id\n"
+    "  Cause:  instance id was derived from hostname or /etc/machine-id;\n"
+    "          those are shared across instances and unsafe for a\n"
+    "          destructive mirror\n"
+    "  Action: Set CAPTURE_MACHINE_ID or pass --sync-machine-id\n"
+    "  Exit:   1"
 )
 
 _SOURCE_CREATE_FAIL_TEMPLATE = (
-    "error: cannot create source directory {path}: {os_error}; check "
-    "permissions or set CAPTURE_BASE_PATH to a writable dir — valid example: "
-    "CAPTURE_BASE_PATH=/writable/captures capture-proxy --sync"
+    "error: cannot create source directory\n"
+    "  Cause:  {os_error}\n"
+    "  Action: Check permissions or set CAPTURE_BASE_PATH to a writable dir\n"
+    "  Exit:   1"
 )
 
 _RCLONE_FAILURE_TEMPLATE = (
-    "error: rclone {cmd} {source} {dest} exited {rc}; full argv: {argv} — "
-    "check upstream_status in errors/ and network to {remote}"
+    "error: rclone command failed\n"
+    "  Cause:  rclone {cmd} {source} {dest} exited {rc}\n"
+    "  Action: Check upstream_status in errors/ and network to {remote}\n"
+    "  Exit:   1"
 )
 
 _ALREADY_RUNNING_TEMPLATE = (
@@ -313,7 +325,12 @@ def sync_daemon_loop(settings: dict[str, object]) -> int:
 
     existing = _read_pid(pid_file)
     if existing is not None and _pid_alive(existing):
-        print(_ALREADY_RUNNING_TEMPLATE.format(pid=existing))
+        print(
+            "error: sync daemon already running\n"
+            f"  Cause:  sync daemon pid {existing} is alive\n"
+            "  Action: Stop it with: capture-proxy --sync-stop\n"
+            "  Exit:   0"
+        )
         return 0
 
     lock_fd: int | None = None
@@ -330,12 +347,19 @@ def sync_daemon_loop(settings: dict[str, object]) -> int:
             while time.monotonic() < deadline:
                 existing_after = _read_pid(pid_file)
                 if existing_after is not None and _pid_alive(existing_after):
-                    print(_ALREADY_RUNNING_TEMPLATE.format(pid=existing_after))
+                    print(
+                        "error: sync daemon already running\n"
+                        f"  Cause:  sync daemon pid {existing_after} is alive\n"
+                        "  Action: Stop it with: capture-proxy --sync-stop\n"
+                        "  Exit:   0"
+                    )
                     return 0
                 time.sleep(0.05)
             print(
-                "error: another sync daemon start is in progress; "
-                "retry in a moment — run: capture-proxy --sync-status",
+                "error: sync daemon start in progress\n"
+                "  Cause:  another sync daemon start holds the lock\n"
+                "  Action: Retry in a moment — run: capture-proxy --sync-status\n"
+                "  Exit:   1",
                 file=sys.stderr,
             )
             return 1
@@ -373,7 +397,13 @@ def sync_daemon_loop(settings: dict[str, object]) -> int:
         print(_DAEMON_STARTED_TEMPLATE.format(pid=child.pid))
         return 0
     except OSError as err:
-        print(f"error: cannot start sync daemon: {err}", file=sys.stderr)
+        print(
+            "error: cannot start sync daemon\n"
+            f"  Cause:  {err}\n"
+            "  Action: Check permissions on the sync pid file directory\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
         return 1
     finally:
         if lock_fd is not None:
@@ -454,13 +484,21 @@ def _run_loop(settings: dict[str, object]) -> int:
             os.fsync(lock_fd)
         except BlockingIOError:
             print(
-                "error: another sync daemon holds the lock; stop it with: "
-                "capture-proxy --sync-stop",
+                "error: sync daemon already running\n"
+                "  Cause:  another sync daemon holds the lock\n"
+                "  Action: Stop it with: capture-proxy --sync-stop\n"
+                "  Exit:   1",
                 file=sys.stderr,
             )
             return 1
         except OSError as err:
-            print(f"error: cannot acquire sync lock: {err}", file=sys.stderr)
+            print(
+                "error: cannot acquire sync lock\n"
+                f"  Cause:  {err}\n"
+                "  Action: Check permissions on the sync pid file directory\n"
+                "  Exit:   1",
+                file=sys.stderr,
+            )
             return 1
 
     while True:
@@ -510,7 +548,10 @@ def sync_stop(pid_file: Path) -> int:
             pass
     except PermissionError:
         print(
-            f"capture-proxy: cannot stop sync pid {pid} (permission denied)",
+            "error: cannot stop sync daemon\n"
+            f"  Cause:  permission denied for pid {pid}\n"
+            "  Action: Run as the user that owns the sync daemon process\n"
+            "  Exit:   1",
             file=sys.stderr,
         )
         return 1
