@@ -25,6 +25,14 @@ jobs:
       - name: Install rclone
         run: |
           curl https://rclone.org/install.sh | sudo bash
+      - name: Configure rclone gdrive remote
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf << 'EOF'
+[gdrive]
+type = local
+root = /tmp/rclone-gdrive-dummy
+EOF
       - name: Lint
         run: uv run ruff check .
       - name: Format check
