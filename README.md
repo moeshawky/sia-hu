@@ -1,4 +1,6 @@
 # sia-hu — Sia + Hu
+![sia-hu: Sia (hidden perception) → Hu (uttered word)](https://repository-images.githubusercontent.com/1448504266/6fea9ba3-dd0b-4889-969e-3f35f821e873)
+
 
 **Sia** (sỉꜣ): divine perception, deep insight, interior knowledge — perceiving what
 is hidden inside a closed form BEFORE it is spoken (the pre-verbal activation state,
