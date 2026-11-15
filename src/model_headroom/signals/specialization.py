@@ -63,7 +63,21 @@ def analyze_specialization(
     try:
         # Flatten each expert weight to a 1D vector and move to device
         flat_weights = [w.flatten().float().to(device) for w in weights]
-        stacked = torch.stack(flat_weights)
+
+        # Finiteness guard: NaN/Inf expert weights cannot produce a valid
+        # similarity measurement — return error, never computed/1.0.
+        stacked_for_check = torch.stack(flat_weights)
+        if not torch.isfinite(stacked_for_check).all():
+            return SpecializationReport(
+                mean_inter_expert_similarity=0.0,
+                max_inter_expert_similarity=0.0,
+                collapse_threshold=collapse_threshold,
+                is_collapsed=False,
+                signal_status="error",
+                error_message="non-finite (NaN/Inf) expert weights cannot be compared",
+            )
+
+        stacked = stacked_for_check
 
         # Normalize once, then single batched Gram GEMM
         normalized = torch.nn.functional.normalize(stacked, p=2, dim=1)

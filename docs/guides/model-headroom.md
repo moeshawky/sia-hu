@@ -15,7 +15,7 @@ Model Headroom Analyzer — 7 core signals + 2 opt-in gradient diagnostics for
 training headroom on MoE and dense models. Python package, strict types, 21 frozen
 dataclasses, 95% test coverage.
 
-**Version:** 0.5.0 — the authority half of sia-hu. Scores; never proxies.
+**Version:** 0.3.0 — the authority half of sia-hu. Scores; never proxies.
 
 ---
 

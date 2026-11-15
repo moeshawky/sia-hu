@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from model_headroom.analysis.scoring import _score_signal, compute_headroom_score
@@ -71,7 +72,11 @@ class TestValidZeroGradients:
 class TestMissingSignalsNoReward:
     """Missing/invalid signals must not raise composite confidence."""
 
-    def test_all_skipped_composite_zero(self) -> None:
+    def test_all_skipped_composite_is_neutral_prior(self) -> None:
+        # No signal was measured. The composite must be the neutral prior:
+        # 0.0 would assert "maximally little headroom" and 1.0 would assert
+        # the opposite. Neither is supported by absent evidence, so the
+        # composite must not reward absence and must not punish it either.
         signals = [
             SignalResult(
                 signal_name="loss_saturation",
@@ -102,7 +107,9 @@ class TestMissingSignalsNoReward:
             metadata={},
         )
         score = compute_headroom_score(report)
-        assert score == 0.0
+        assert score == pytest.approx(0.5)
+        assert score != 0.0
+        assert score != 1.0
 
     def test_invalid_signal_does_not_improve_composite(self) -> None:
         # no_gradient (cat 3) → 0.0 numerator, weight retained

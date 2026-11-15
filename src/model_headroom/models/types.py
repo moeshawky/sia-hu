@@ -224,7 +224,12 @@ class GradWeightRatio:
     z_score: float | None
     layer_name: str
     signal_status: Literal[
-        "computed", "zero_weight", "no_gradient", "invalid_evidence", "error"
+        "computed",
+        "zero_weight",
+        "no_gradient",
+        "invalid_evidence",
+        "insufficient_data",
+        "error",
     ]
     error_message: str | None = None
 
@@ -249,6 +254,7 @@ class DeadNeuronReport:
     never_active_count: int = 0
     never_active_fraction: float = 0.0
     source_type: SourceType = "measured"
+    degenerate_criterion: bool = False
 
 
 @dataclass(frozen=True)

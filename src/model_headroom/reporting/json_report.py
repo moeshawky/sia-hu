@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from model_headroom.analysis.scoring import evidence_state
+
 if TYPE_CHECKING:
     from model_headroom.models.types import HeadroomReport
 
@@ -46,12 +48,23 @@ def _signal_to_dict(signal: Any) -> dict[str, Any]:
 
 
 def generate_json_report(report: HeadroomReport) -> str:
-    """Serialize a HeadroomReport to a JSON string with 2-space indentation. Builds a top-level dict containing model_name, model_path, timestamp, overall_headroom_score, recommendations, metadata, analysis_mode, decision_grade, and a signals list produced by _signal_to_dict. When coverage_metrics is present, adds the full metrics dict plus flattened top-level fields (measurement_coverage, headroom_score_measured, score_lower_bound, score_upper_bound). Uses default=str for non-serializable values."""
+    """Serialize a HeadroomReport to a JSON string with 2-space indentation. Builds a top-level dict containing model_name, model_path, timestamp, overall_headroom_score, recommendations, metadata, analysis_mode, decision_grade, and a signals list produced by _signal_to_dict. When coverage_metrics is present, adds the full metrics dict plus flattened top-level fields (measurement_coverage, headroom_score_measured, score_lower_bound, score_upper_bound). Also emits evidence_state and composite_kind so a consumer can tell a prior-mixed composite from a measurement. Uses default=str for non-serializable values."""
+    evidence = report.metadata.get("evidence_state")
+    if not isinstance(evidence, str):
+        evidence = evidence_state(report)
+    composite_kind = report.metadata.get("composite_kind")
+    if not isinstance(composite_kind, str):
+        # Derive from evidence state: only full coverage is a pure measurement.
+        composite_kind = (
+            "measured" if evidence == "full_coverage" else "prior_mixed_expectation"
+        )
     report_dict: dict[str, Any] = {
         "model_name": report.model_name,
         "model_path": report.model_path,
         "timestamp": report.timestamp,
         "overall_headroom_score": report.overall_headroom_score,
+        "composite_kind": composite_kind,
+        "evidence_state": evidence,
         "recommendations": report.recommendations,
         "metadata": report.metadata,
         "signals": [_signal_to_dict(s) for s in report.signals],

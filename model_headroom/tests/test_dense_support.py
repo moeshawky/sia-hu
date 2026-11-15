@@ -140,6 +140,16 @@ def _full_data() -> dict[str, Any]:
                 weight=torch.ones(10, 10),
                 layer_name="layer_0",
             ),
+            GradientWeightPair(
+                gradient=torch.ones(10, 10) * 0.2,
+                weight=torch.ones(10, 10),
+                layer_name="layer_1",
+            ),
+            GradientWeightPair(
+                gradient=torch.ones(10, 10) * 0.3,
+                weight=torch.ones(10, 10),
+                layer_name="layer_2",
+            ),
         ],
         "mlp_activations": [
             MLPActivations(
@@ -331,9 +341,15 @@ class TestScoringNotApplicable:
         assert compute_headroom_score(report) == pytest.approx(1.0)
 
     def test_skipped_still_counts_neutral(self) -> None:
+        # The five universal signals are computed and score 1.0 (weight 0.80);
+        # R-06 and R-07 are "skipped" (weight 0.20) and contribute the neutral
+        # prior 0.5 each. Composite = (0.80 + 0.20*0.5) / 1.00 = 0.90.
+        # The name of this test states the contract: skipped counts NEUTRAL,
+        # not zero and not one.
         score = compute_headroom_score(TestScoringNotApplicable._report("skipped"))
-        assert score == pytest.approx(0.8)
+        assert score == pytest.approx(0.9)
         assert score < 1.0
+        assert score > 0.8
 
 
 class TestDenseAsOneExpert:

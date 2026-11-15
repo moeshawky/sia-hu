@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from model_headroom.analysis.scoring import (
+    EVIDENCE_STATE_INSUFFICIENT,
+    EVIDENCE_STATE_PARTIAL,
+    evidence_state,
+)
+
 if TYPE_CHECKING:
     from model_headroom.models.types import HeadroomReport, SignalResult
 
@@ -257,9 +263,24 @@ def generate_human_report(report: HeadroomReport) -> str:
 
     score = report.overall_headroom_score
     bar_len = 40
-    filled = int(score * bar_len)
-    bar = "█" * filled + "░" * (bar_len - filled)
-    lines.append(f"  HEADROOM SCORE: [{bar}] {score:.2f} (composite)")
+    state = report.metadata.get("evidence_state")
+    if not isinstance(state, str):
+        state = evidence_state(report)
+    if state == EVIDENCE_STATE_INSUFFICIENT:
+        lines.append("  ⚠ INSUFFICIENT EVIDENCE — no signal was measured.")
+        lines.append("    No headroom value can be asserted for this model.")
+        lines.append(
+            f"    Composite {score:.2f} is a neutral prior, not a measurement."
+        )
+    else:
+        filled = int(score * bar_len)
+        bar = "█" * filled + "░" * (bar_len - filled)
+        if state == EVIDENCE_STATE_PARTIAL:
+            lines.append(
+                f"  HEADROOM SCORE: [{bar}] {score:.2f} (composite, prior-mixed)"
+            )
+        else:
+            lines.append(f"  HEADROOM SCORE: [{bar}] {score:.2f} (composite)")
     comparable = report.metadata.get("effective_rank_comparability")
     if isinstance(comparable, dict):
         lines.extend(_format_r03_bound(comparable))

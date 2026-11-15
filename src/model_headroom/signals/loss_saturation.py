@@ -74,13 +74,16 @@ def analyze_loss_saturation(
         slopes.append(slope)
 
     if not slopes:
+        # No usable intervals: all token deltas were <= 0 (duplicates or
+        # non-increasing token counts). A loss curve with duplicate token
+        # counts cannot produce a valid slope, so do not report computed/1.0.
         return SaturationReport(
             is_saturated=False,
             saturation_point_tokens=None,
             loss_delta_threshold=slope_threshold,
             plateau_slope=0.0,
             data_points_used=len(loss_curve),
-            signal_status="computed",
+            signal_status="insufficient_data",
         )
 
     # Check if the last `min_intervals` slopes are all below threshold

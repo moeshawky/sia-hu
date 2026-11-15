@@ -114,3 +114,35 @@ class TestDeadNeuronsError:
         )
         result = analyze_dead_neurons(activations)
         assert result.signal_status == "error"
+
+
+class TestDeadNeuronsDegenerateCriterion:
+    """The exact-zero amax criterion is non-discriminating on real gated-FFN
+    activations (exact zeros essentially never occur). When near-zero
+    occupancy is high but no neuron is exactly dead, the signal must disclose
+    the degeneracy rather than presenting a confident 1.0."""
+
+    def test_degenerate_criterion_disclosed(self) -> None:
+        # All activations near zero but never exactly zero -> dead_count=0,
+        # near_zero_occupancy high -> degenerate_criterion=True.
+        activations = MLPActivations(
+            activations=torch.full((2, 10, 16), 1e-6),
+            layer_name="degenerate",
+        )
+        result = analyze_dead_neurons(activations)
+        assert result.dead_count == 0
+        assert result.dead_fraction == 0.0
+        assert result.near_zero_occupancy is not None
+        assert result.near_zero_occupancy > 0.5
+        assert result.degenerate_criterion is True
+        assert result.signal_status == "computed"
+
+    def test_non_degenerate_not_flagged(self) -> None:
+        # Real active neurons: near_zero low, dead_count=0 -> not degenerate.
+        activations = MLPActivations(
+            activations=torch.ones(2, 10, 16) * 0.5,
+            layer_name="active",
+        )
+        result = analyze_dead_neurons(activations)
+        assert result.dead_count == 0
+        assert result.degenerate_criterion is False

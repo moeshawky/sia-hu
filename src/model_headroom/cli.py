@@ -167,6 +167,39 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "accelerator (cuda preferred), else cpu (default: auto)",
     )
     parser.add_argument(
+        "--acquire",
+        action="store_true",
+        help="Discover and acquire evidence for the model automatically: resolve "
+        "the checkpoint layout, sample real weight matrices, and (with "
+        "--acquire-prompts) capture real FFN activations.",
+    )
+    parser.add_argument(
+        "--acquire-prompts",
+        default="",
+        help="Text used to drive a real forward pass for FFN activation "
+        "acquisition. Requires --acquire and a transformers-installable model.",
+    )
+    parser.add_argument(
+        "--acquire-evidence-repo",
+        default="",
+        help="Hub repository (model or dataset) to search for published "
+        "training history. Requires --acquire.",
+    )
+    parser.add_argument(
+        "--acquire-evidence-repo-type",
+        default="models",
+        choices=["models", "datasets"],
+        help="Repository type for --acquire-evidence-repo.",
+    )
+    parser.add_argument(
+        "--acquire-lineage-authenticated",
+        action="store_true",
+        help="Operator attestation that a published training-history artifact "
+        "demonstrably belongs to the checkpoint's training lineage. When "
+        "set, R-01 evidence is labelled authenticated_ancestor; otherwise "
+        "published_context.",
+    )
+    parser.add_argument(
         "--output-format",
         choices=["json", "human"],
         default="human",
@@ -338,6 +371,17 @@ def _safetensors_weight_samples(
     )
     rows = max_rows if isinstance(max_rows, int) and max_rows > 0 else 256
 
+    from model_headroom.acquire.layout import (
+        resolve_weight_layout,
+        sample_layout_weights,
+    )
+
+    layout = resolve_weight_layout(path)
+    if layout.layers:
+        resolved = sample_layout_weights(layout, path, max_rows=rows, device=device)
+        if resolved:
+            return resolved
+
     for template, projections in _SAFETENSORS_TENSOR_TEMPLATES:
         for proj in projections:
             names: list[str] = []
@@ -372,6 +416,105 @@ def _safetensors_weight_samples(
         file=sys.stderr,
     )
     return None
+
+
+def _run_acquisition(args: argparse.Namespace, device: str) -> dict[str, Any]:
+    """Acquire real evidence for a model without hand-prepared signal files.
+
+    Resolves the checkpoint's tensor layout (the prefix is discovered, not
+    assumed), samples real weight matrices for R-03, optionally runs a real
+    forward pass to capture per-channel FFN statistics for R-05, and
+    optionally retrieves a published training history for R-01. Each route
+    reports what it obtained and what it could not obtain; none fabricates a
+    value to fill a gap.
+    """
+    from model_headroom.acquire.activations import capture_ffn_channel_stats
+    from model_headroom.acquire.layout import (
+        resolve_weight_layout,
+        sample_layout_weights,
+    )
+
+    result: dict[str, Any] = {
+        "weight_samples": None,
+        "channel_stats": None,
+        "loss_curve": None,
+        "notes": [],
+    }
+
+    layout = resolve_weight_layout(args.model_path)
+    if layout.layers:
+        result["weight_samples"] = sample_layout_weights(
+            layout,
+            args.model_path,
+            max_rows=args.rank_sample_count or 256,
+            device=device,
+        )
+        result["notes"].append(
+            f"resolved checkpoint layout: prefix={layout.prefix!r} "
+            f"container={layout.container!r} layers={len(layout.layers)} "
+            f"families={list(layout.families)}"
+        )
+    else:
+        result["notes"].append(
+            "no safetensors layout resolved; R-03 could not be acquired"
+        )
+
+    if args.acquire_prompts:
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+
+            tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+            model = AutoModelForCausalLM.from_pretrained(args.model_path)
+            encoded = tokenizer(args.acquire_prompts, return_tensors="pt").input_ids
+            stats = capture_ffn_channel_stats(model, encoded)
+            result["channel_stats"] = list(stats.values())
+            result["notes"].append(
+                f"captured per-channel FFN statistics at {len(stats)} "
+                "measurement points"
+            )
+            del model
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception as e:
+            result["notes"].append(f"activation acquisition failed: {e}")
+
+    if args.acquire_evidence_repo:
+        try:
+            from model_headroom.acquire.published import acquire_published_loss_evidence
+
+            bundle = acquire_published_loss_evidence(
+                args.acquire_evidence_repo,
+                kind=args.acquire_evidence_repo_type,
+                lineage_authenticated=getattr(
+                    args, "acquire_lineage_authenticated", False
+                ),
+            )
+            result["notes"].append(
+                "published evidence: "
+                f"class={bundle.provenance.provenance_class} "
+                f"source={bundle.provenance.source_url} "
+                f"applicability={bundle.provenance.applicability}"
+            )
+            for limitation in bundle.provenance.limitations:
+                result["notes"].append(f"published-evidence limitation: {limitation}")
+            if isinstance(bundle.payload, (list, tuple)):
+                points = list(bundle.payload)
+            else:
+                points = None
+            if points:
+                result["loss_curve"] = list(points)
+                result["notes"].append(
+                    f"published evidence: mapped {len(points)} loss points"
+                )
+            else:
+                result["notes"].append(
+                    "published evidence: no loss-like series found; nothing mapped"
+                )
+        except Exception as e:
+            result["notes"].append(f"published-evidence acquisition failed: {e}")
+
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -566,6 +709,26 @@ def main(argv: list[str] | None = None) -> int:
                 args.model_path, args.sampling_mode, args.rank_sample_count, device
             )
 
+    channel_stats = None
+    acquired_loss_curve = None
+    if getattr(args, "acquire", False):
+        acquired = _run_acquisition(args, device)
+        for note in acquired["notes"]:
+            print(f"acquire: {note}", file=sys.stderr)
+        if weight_samples is None:
+            weight_samples = acquired["weight_samples"]
+        channel_stats = acquired["channel_stats"]
+        acquired_loss_curve = acquired["loss_curve"]
+        if acquired_loss_curve and loss_curve is None:
+            loss_curve = acquired_loss_curve
+        if (
+            acquired["weight_samples"] is not None
+            and args.weight_pairs_source_type is None
+        ):
+            args.weight_pairs_source_type = "measured"
+        if channel_stats is not None and args.mlp_source_type is None:
+            args.mlp_source_type = "measured"
+
     if args.mlp_activations_file:
         from model_headroom.models.loader import load_mlp_activations_diagnostic
 
@@ -690,6 +853,7 @@ def main(argv: list[str] | None = None) -> int:
             activation_data=activation_data,
             weight_pairs=weight_pairs,
             mlp_activations=mlp_activations,
+            mlp_channel_stats=channel_stats,
             expert_weight_sets=expert_weight_sets,
             architecture=None if args.architecture == "auto" else args.architecture,
             analysis_mode=args.analysis_mode,

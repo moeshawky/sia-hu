@@ -62,6 +62,13 @@ def analyze_dead_neurons(
         mean_abs = float(flat.abs().mean().item())
         variance = float(flat.var(unbiased=False).item())
         near_zero = float((flat.abs() < 1e-5).float().mean().item())
+
+        # Degenerate criterion disclosure: exact-zero amax essentially never
+        # fires on real gated-FFN activations, so dead_count == 0 with high
+        # near_zero_occupancy means the criterion cannot discriminate — the
+        # signal must not present a constant 1.0 as a measurement.
+        degenerate_criterion = dead_count == 0 and near_zero > 0.5 and total_neurons > 0
+
         cross_token_variance = (
             float(neuron_means.var(unbiased=False).item()) if total_neurons > 1 else 0.0
         )
@@ -82,6 +89,7 @@ def analyze_dead_neurons(
             never_active_count=never_active_count,
             never_active_fraction=never_active_fraction,
             source_type=source_type,
+            degenerate_criterion=degenerate_criterion,
         )
     except Exception as e:
         return DeadNeuronReport(

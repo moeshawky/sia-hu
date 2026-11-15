@@ -128,6 +128,22 @@ def analyze_grad_weight_ratios(
     if not valid_ratios:
         return results
 
+    # Small-n guard: fewer than 3 scoreable ratios cannot support a
+    # mean + 2*std outlier test (n=1 → std=0, n=2 → z-score max is 1.0 so
+    # `ratio > mean + 2*std` is arithmetically impossible). Withhold the
+    # confident computed status and report insufficient_data instead.
+    if len(valid_ratios) < 3:
+        for i, result in enumerate(results):
+            if result.signal_status == "computed":
+                results[i] = GradWeightRatio(
+                    ratio=result.ratio,
+                    is_high_pressure=None,
+                    z_score=None,
+                    layer_name=result.layer_name,
+                    signal_status="insufficient_data",
+                )
+        return results
+
     mean_r = sum(valid_ratios) / len(valid_ratios)
     variance = sum((r - mean_r) ** 2 for r in valid_ratios) / len(valid_ratios)
     std_r = variance**0.5

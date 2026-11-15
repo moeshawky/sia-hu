@@ -929,6 +929,7 @@ class TestHeadroomIntegration:
             )
         )
         proxy._upstream_client = mock
+        before = set(sys.modules)
         with TestClient(proxy.app) as c:
             resp = c.post("/v1/chat/completions", json=_chat_body())
         assert resp.status_code == 200
@@ -936,8 +937,11 @@ class TestHeadroomIntegration:
         assert len(records) == 1
         assert records[0]["headroom"] is None
         assert not (Path(base) / "headroom").exists()
-        # off mode never imports the tensor stack
-        assert "safetensors" not in sys.modules
+        # off mode never imports the tensor stack: safetensors/torch must not
+        # be added during this request (another test may have imported them
+        # earlier, so we check what this test itself added).
+        added = set(sys.modules) - before
+        assert not any("safetensors" in m or m == "torch" for m in added)
 
     def test_non_streaming_writes_sidecar_and_ref(self, headroom_proxy):
         proxy, base, _model_dir, mock = headroom_proxy

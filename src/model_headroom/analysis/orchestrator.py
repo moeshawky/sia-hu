@@ -9,9 +9,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from model_headroom.analysis.scoring import (
+    EVIDENCE_STATE_FULL,
+    NEUTRAL_PRIOR,
     compute_coverage_metrics,
     compute_headroom_score,
     decision_grade_gaps,
+    evidence_state,
     generate_recommendations,
 )
 from model_headroom.device import default_device
@@ -178,6 +181,7 @@ def run_analysis(
     isoflop_points: list[Any] | None = None,
     weight_pairs: list[Any] | None = None,
     mlp_activations: list[Any] | None = None,
+    mlp_channel_stats: list[Any] | None = None,
     expert_weight_sets: list[Any] | None = None,
     activation_data: Any | None = None,
     architecture: ArchitectureType | None = None,
@@ -434,7 +438,48 @@ def run_analysis(
             )
         )
 
-    if mlp_activations:
+    if mlp_channel_stats:
+        from model_headroom.acquire.activations import (
+            dead_neuron_report_from_channel_stats,
+        )
+
+        channel_dead: list[SignalResult] = []
+        channel_duration = 0.0
+        for stats in mlp_channel_stats:
+            result = _run_signal(
+                f"dead_neurons_{stats.layer_name}",
+                dead_neuron_report_from_channel_stats,
+                stats,
+                source_type=mlp_src,
+            )
+            channel_duration += result.duration_seconds
+            if result.status == "computed":
+                channel_dead.append(result)
+
+        if channel_dead:
+            worst = max(channel_dead, key=lambda r: r.data.dead_fraction)
+            signals.append(
+                SignalResult(
+                    signal_name="dead_neurons",
+                    status="computed",
+                    data=worst.data,
+                    duration_seconds=channel_duration,
+                    source_type=mlp_src,
+                    verification_status=mlp_ver,
+                )
+            )
+        else:
+            signals.append(
+                SignalResult(
+                    signal_name="dead_neurons",
+                    status="insufficient_data",
+                    data=None,
+                    duration_seconds=channel_duration,
+                    source_type=mlp_src,
+                    verification_status=mlp_ver,
+                )
+            )
+    elif mlp_activations:
         all_dead: list[SignalResult] = []
         total_duration = 0.0
         for act in mlp_activations:
@@ -663,6 +708,14 @@ def run_analysis(
     score = compute_headroom_score(report)
     coverage = compute_coverage_metrics(report)
     report_metadata["decision_grade_gaps"] = decision_grade_gaps(report)
+    report_metadata["evidence_state"] = evidence_state(report)
+    _state = report_metadata["evidence_state"]
+    report_metadata["composite_kind"] = (
+        "measured" if _state == EVIDENCE_STATE_FULL else "prior_mixed_expectation"
+    )
+    report_metadata["composite_prior"] = NEUTRAL_PRIOR
+    report_metadata["composite_applicable_weight"] = coverage.total_applicable_weight
+    report_metadata["composite_measured_weight"] = coverage.measured_weight
     recommendations = generate_recommendations(report)
 
     return HeadroomReport(

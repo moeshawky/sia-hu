@@ -16,7 +16,7 @@ From the repo root (`/kaggle/working/sia-hu`):
 pip install -e ".[headroom]"
 ```
 
-This installs the `sia-hu` package (version 0.5.0, `pyproject.toml:5-7`) in
+This installs the `sia-hu` package (version 0.3.0, `pyproject.toml:5-7`) in
 editable mode plus the `headroom` extra (`pyproject.toml:30-37`): `torch>=2.15`,
 `numpy>=2.5.4`, `safetensors>=0.8.0`, `huggingface_hub>=2.4`, `transformers>=5.22.1`,
 `accelerate>=1.15`. The base install (`pip install -e .`, `pyproject.toml:14-19`)
@@ -256,7 +256,7 @@ at `/kaggle/input/models/qwen-lm/qwen-3/transformers/0.6b/1`:
 
 - `pip install -e ".[headroom]"` — deps already satisfied (torch 2.11.0+cpu,
   numpy 2.1.3, safetensors 0.8.0, transformers 5.16.1, huggingface_hub 1.33.0,
-  accelerate 1.14.0); sia-hu 0.5.0 installed editable at
+  accelerate 1.14.0); sia-hu 0.3.0 installed editable at
   `/kaggle/working/sia-hu`.
 - Base run (`--model-name qwen3-0.6b --model-path ...`) — exit 0, all signals
   skipped/single_expert, composite 0.50, measured coverage 0%.

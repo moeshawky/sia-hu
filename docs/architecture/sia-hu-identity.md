@@ -47,10 +47,9 @@ corresponding existing CLI's `main()` function:
 - `sia capture-proxy ...` → `capture-proxy` (the carrier, emits Hu)
 - `sia model-headroom ...` → `model-headroom` (the authority, scores Sia)
 - `sia model-headroom-refusal ...` → `model-headroom-refusal` (refusal analysis)
-- `sia model-headroom-paired ...` → `model-headroom-paired` (paired-model recovery diagnostics)
 
 The existing CLIs remain byte-for-byte unchanged. `sia` adds no flags, no behavior,
-no new subcommands beyond the six it aliases. It is the bridge that lets an
+no new subcommands beyond the three it aliases. It is the bridge that lets an
 operator address both sides of the identity with one command.
 
 ---

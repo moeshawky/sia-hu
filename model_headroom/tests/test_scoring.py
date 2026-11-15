@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import pytest
+
 from model_headroom.analysis.scoring import (
     _score_signal,
     compute_headroom_score,
+    decision_grade_gaps,
     generate_recommendations,
 )
 from model_headroom.models.types import (
     DeadNeuronReport,
     EffectiveRankResult,
+    GradWeightRatio,
     HeadroomReport,
     LoadBalanceReport,
     SaturationReport,
@@ -163,8 +167,12 @@ class TestScoreSignal:
 
 class TestComputeHeadroomScore:
     def test_all_skipped(self, headroom_report_minimal: HeadroomReport) -> None:
+        # Every applicable signal is skipped, so no evidence exists at all. The
+        # composite is a prior-mixed expectation: it is the neutral prior, not a
+        # measured 0.0 ("no headroom") and not a measured 1.0 ("full headroom").
+        # Both of those would be claims the absent data does not support.
         score = compute_headroom_score(headroom_report_minimal)
-        assert score == 0.0
+        assert score == pytest.approx(0.5)
 
     def test_score_in_range(self, headroom_report_computed: HeadroomReport) -> None:
         score = compute_headroom_score(headroom_report_computed)
@@ -188,3 +196,73 @@ class TestGenerateRecommendations:
         recs = generate_recommendations(headroom_report_minimal)
         assert len(recs) >= 3
         assert all(isinstance(r, str) for r in recs)
+
+
+class TestProvenanceIdentityBinding:
+    """Decision-grade gate must bind gradient provenance to the model being
+    scored: model_revision/dataset_hash present is not enough — they must
+    match the model under analysis."""
+
+    def _grad_report(
+        self, model_name: str, model_revision: str | None
+    ) -> HeadroomReport:
+        eff_rank = EffectiveRankResult(
+            rank=4.0,
+            entropy=1.0,
+            percentage_of_full_rank=0.5,
+            singular_values_count=8,
+            signal_status="computed",
+        )
+        grad_ratio = GradWeightRatio(
+            ratio=0.5,
+            is_high_pressure=False,
+            z_score=0.0,
+            layer_name="layer_0",
+            signal_status="computed",
+        )
+        return HeadroomReport(
+            model_name=model_name,
+            model_path=f"/tmp/{model_name}",
+            timestamp="2026-01-01T00:00:00+00:00",
+            signals=[
+                SignalResult(
+                    signal_name="effective_rank",
+                    status="computed",
+                    data=eff_rank,
+                    duration_seconds=0.0,
+                    source_type="measured",
+                    verification_status="verified",
+                ),
+                SignalResult(
+                    signal_name="grad_weight_ratio",
+                    status="computed",
+                    data=[grad_ratio],
+                    duration_seconds=0.0,
+                    source_type="measured",
+                    verification_status="verified",
+                ),
+            ],
+            overall_headroom_score=0.5,
+            recommendations=[],
+            metadata={
+                "gradient_provenance": {
+                    "model_revision": model_revision,
+                    "dataset_hash": "abc123",
+                }
+            },
+        )
+
+    def test_matching_provenance_passes_identity(self) -> None:
+        report = self._grad_report("target-model", "target-model")
+        gaps = decision_grade_gaps(report)
+        assert not any("identity mismatch" in g for g in gaps)
+
+    def test_mismatched_model_revision_adds_gap(self) -> None:
+        report = self._grad_report("target-model", "different-model")
+        gaps = decision_grade_gaps(report)
+        assert any("identity mismatch" in g for g in gaps)
+
+    def test_missing_model_revision_adds_incomplete_gap(self) -> None:
+        report = self._grad_report("target-model", None)
+        gaps = decision_grade_gaps(report)
+        assert any("gradient provenance incomplete" in g for g in gaps)

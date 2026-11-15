@@ -19,9 +19,14 @@ class TestGradWeightRatioFunctional:
                 weight=torch.ones(10, 10),
                 layer_name="layer_1",
             ),
+            GradientWeightPair(
+                gradient=torch.ones(10, 10) * 0.5,
+                weight=torch.ones(10, 10),
+                layer_name="layer_2",
+            ),
         ]
         result = analyze_grad_weight_ratios(pairs)
-        assert len(result) == 2
+        assert len(result) == 3
         assert all(not r.is_high_pressure for r in result)
         assert all(r.signal_status == "computed" for r in result)
 
@@ -42,6 +47,42 @@ class TestGradWeightRatioFunctional:
         ]
         result = analyze_grad_weight_ratios(pairs)
         assert any(r.is_high_pressure and r.layer_name == "high" for r in result)
+
+    def test_grad_ratio_n1_never_full_score(self) -> None:
+        """n=1 scoreable ratio must never report a confident computed score."""
+        pairs = [
+            GradientWeightPair(
+                gradient=torch.ones(10, 10) * 50.0,
+                weight=torch.ones(10, 10),
+                layer_name="only",
+            ),
+        ]
+        result = analyze_grad_weight_ratios(pairs)
+        assert len(result) == 1
+        assert result[0].signal_status == "insufficient_data"
+        assert result[0].is_high_pressure is None
+        assert result[0].z_score is None
+
+    def test_grad_ratio_n2_never_full_score(self) -> None:
+        """n=2 scoreable ratios must never report a confident computed score,
+        even with an extreme 0.01 vs 50.0 spread (max z for n=2 is 1.0)."""
+        pairs = [
+            GradientWeightPair(
+                gradient=torch.ones(10, 10) * 0.01,
+                weight=torch.ones(10, 10),
+                layer_name="low",
+            ),
+            GradientWeightPair(
+                gradient=torch.ones(10, 10) * 50.0,
+                weight=torch.ones(10, 10),
+                layer_name="high",
+            ),
+        ]
+        result = analyze_grad_weight_ratios(pairs)
+        assert len(result) == 2
+        assert all(r.signal_status == "insufficient_data" for r in result)
+        assert all(r.is_high_pressure is None for r in result)
+        assert all(r.z_score is None for r in result)
 
 
 class TestGradWeightRatioEdge:
@@ -105,4 +146,4 @@ class TestGradWeightRatioEdge:
         ]
         result = analyze_grad_weight_ratios(pairs)
         assert result[0].signal_status == "zero_weight"
-        assert result[1].signal_status == "computed"
+        assert result[1].signal_status == "insufficient_data"

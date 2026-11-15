@@ -46,6 +46,16 @@ class TestOrchestratorFunctional:
                     weight=__import__("torch").ones(10, 10),
                     layer_name="layer_0",
                 ),
+                GradientWeightPair(
+                    gradient=__import__("torch").ones(10, 10) * 0.2,
+                    weight=__import__("torch").ones(10, 10),
+                    layer_name="layer_1",
+                ),
+                GradientWeightPair(
+                    gradient=__import__("torch").ones(10, 10) * 0.3,
+                    weight=__import__("torch").ones(10, 10),
+                    layer_name="layer_2",
+                ),
             ],
             mlp_activations=[
                 MLPActivations(

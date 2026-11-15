@@ -8,6 +8,7 @@ measured/total distinction.
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from model_headroom.analysis.scoring import _score_signal, compute_headroom_score
@@ -60,13 +61,15 @@ class TestSignalNullGradient:
     def test_real_gradient_is_unchanged(self) -> None:
         gradient = torch.ones(4, 4) * 0.5
         weight = torch.ones(4, 4)
-        data = analyze_grad_weight_ratios([_pair(gradient, weight, "l0")])
-        assert len(data) == 1
-        r = data[0]
-        assert r.signal_status == "computed"
-        assert r.ratio == 0.5
-        assert r.z_score == 0.0
-        assert r.is_high_pressure is False
+        # n=3 satisfies the small-n guard so the signal can report computed.
+        pairs = [_pair(gradient, weight, f"l{i}") for i in range(3)]
+        data = analyze_grad_weight_ratios(pairs)
+        assert len(data) == 3
+        for r in data:
+            assert r.signal_status == "computed"
+            assert r.ratio == 0.5
+            assert r.z_score == 0.0
+            assert r.is_high_pressure is False
 
 
 class TestScoreMeasuredOnly:
@@ -76,6 +79,7 @@ class TestScoreMeasuredOnly:
         pairs = [
             _pair(torch.ones(4, 4) * 0.1, torch.ones(4, 4), "l1"),
             _pair(torch.ones(4, 4) * 0.2, torch.ones(4, 4), "l2"),
+            _pair(torch.ones(4, 4) * 0.3, torch.ones(4, 4), "l3"),
         ]
         data = analyze_grad_weight_ratios(pairs)
         sr = SignalResult(
@@ -85,10 +89,14 @@ class TestScoreMeasuredOnly:
             duration_seconds=0.0,
         )
         score = _score_signal(sr)
-        # Both computed, neither high pressure: 1.0 - 0/2 = 1.0
+        # All computed, none high pressure: 1.0 - 0/3 = 1.0
         assert score == 1.0
 
-    def test_composite_all_placeholders_is_zero_not_one(self) -> None:
+    def test_composite_all_placeholders_is_neutral_prior(self) -> None:
+        # Every pair carries no gradient, so there is no evidence about gradient
+        # pressure at all. The composite must be the neutral prior: 1.0 would
+        # claim "no pressure" (the A-1 inflation) and 0.0 would claim "maximum
+        # pressure" (the inverse error). Neither is supported by the data.
         pairs = [
             _pair(None, torch.ones(4, 4), "l1"),
             _pair(None, torch.ones(4, 4), "l2"),
@@ -112,9 +120,8 @@ class TestScoreMeasuredOnly:
             metadata={},
         )
         score = compute_headroom_score(report)
-        # Composite is a float: None signal score → 0.0 numerator, weight retained.
-        # Score is 0.0, never 1.0 (the inflation is gone).
-        assert score == 0.0
+        assert score == pytest.approx(0.5)
+        assert score != 1.0
 
     def test_mix_uses_measured_denominator(self) -> None:
         data = [
@@ -211,6 +218,7 @@ class TestCompositeScoreIntegration:
         pairs = [
             _pair(torch.ones(4, 4) * 0.1, torch.ones(4, 4), "l1"),
             _pair(torch.ones(4, 4) * 0.2, torch.ones(4, 4), "l2"),
+            _pair(torch.ones(4, 4) * 0.3, torch.ones(4, 4), "l3"),
         ]
         data = analyze_grad_weight_ratios(pairs)
         signals = [
@@ -233,7 +241,11 @@ class TestCompositeScoreIntegration:
         score = compute_headroom_score(report)
         assert score == 1.0
 
-    def test_composite_all_placeholders_is_zero_not_one(self) -> None:
+    def test_composite_all_placeholders_is_neutral_prior(self) -> None:
+        # Every pair carries no gradient, so there is no evidence about gradient
+        # pressure at all. The composite must be the neutral prior: 1.0 would
+        # claim "no pressure" (the A-1 inflation) and 0.0 would claim "maximum
+        # pressure" (the inverse error). Neither is supported by the data.
         pairs = [
             _pair(None, torch.ones(4, 4), "l1"),
             _pair(None, torch.ones(4, 4), "l2"),
@@ -257,9 +269,8 @@ class TestCompositeScoreIntegration:
             metadata={},
         )
         score = compute_headroom_score(report)
-        # Composite is a float: None signal score → 0.0 numerator, weight retained.
-        # Score is 0.0, never 1.0 (the inflation is gone).
-        assert score == 0.0
+        assert score == pytest.approx(0.5)
+        assert score != 1.0
 
     def test_composite_mix_measured_denominator(self) -> None:
         data = [

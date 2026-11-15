@@ -62,6 +62,20 @@ class TestLossSaturationError:
         result = analyze_loss_saturation(curve)
         assert result.signal_status == "computed"
 
+    def test_all_duplicate_token_counts_insufficient_data(self) -> None:
+        """Duplicate token counts (no strictly increasing deltas) must not
+        produce computed/1.0 — return insufficient_data instead."""
+        curve = [
+            LossDataPoint(tokens_trained=100, validation_loss=2.0),
+            LossDataPoint(tokens_trained=100, validation_loss=1.5),
+            LossDataPoint(tokens_trained=100, validation_loss=1.2),
+            LossDataPoint(tokens_trained=100, validation_loss=1.199),
+        ]
+        result = analyze_loss_saturation(curve)
+        assert result.signal_status == "insufficient_data"
+        assert result.is_saturated is False
+        assert result.data_points_used == 4
+
     def test_negative_loss(self) -> None:
         curve = [
             LossDataPoint(tokens_trained=100, validation_loss=-1.0),

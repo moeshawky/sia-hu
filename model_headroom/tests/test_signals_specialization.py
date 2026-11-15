@@ -60,3 +60,31 @@ class TestSpecializationEdge:
         result = analyze_specialization(weights)
         assert result.mean_inter_expert_similarity == pytest.approx(1.0, abs=1e-5)
         assert result.is_collapsed is True
+
+
+class TestSpecializationNaN:
+    """NaN expert weights must not produce computed/1.0 — return error."""
+
+    def test_nan_expert_weights_error(self) -> None:
+        weights = ExpertWeights(
+            expert_weights=[
+                torch.full((64, 128), float("nan")),
+                torch.ones(64, 128),
+            ],
+            layer_name="nan_layer",
+        )
+        result = analyze_specialization(weights)
+        assert result.signal_status == "error"
+        assert result.is_collapsed is False
+
+    def test_inf_expert_weights_error(self) -> None:
+        weights = ExpertWeights(
+            expert_weights=[
+                torch.full((64, 128), float("inf")),
+                torch.ones(64, 128),
+            ],
+            layer_name="inf_layer",
+        )
+        result = analyze_specialization(weights)
+        assert result.signal_status == "error"
+        assert result.is_collapsed is False

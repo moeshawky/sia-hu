@@ -37,6 +37,41 @@ DEFAULT_SIGNAL_WEIGHTS: dict[str, float] = {
 
 _MIN_COVERAGE_FOR_DECISION_GRADE = 0.7
 
+# Contribution of a signal that produced no scoreable measurement.
+#
+# The composite must distinguish "we measured this and it is bad" from "we
+# measured nothing". 0.0 is a MEASURED claim of maximal badness; asserting it
+# from absent evidence is exactly the failure the mission forbids ("an absence
+# of signals is not evidence that a model has zero headroom"). A signal with
+# no evidence therefore contributes the neutral prior 0.5 — maximum ignorance
+# — which is the behaviour the frozen contract specifies ("Skipped signals
+# score 0.5 | Neutral prior, not a measurement", docs/concepts/frozen-contracts.md).
+#
+# A signal whose computation FAILED, or whose evidence was produced but is
+# numerically invalid, contributes 0.0: a claim was attempted and it is not
+# usable, which must not be laundered into a neutral "no information".
+NEUTRAL_PRIOR = 0.5
+
+# Architecturally impossible: excluded from numerator and denominator alike.
+_EXCLUDED_STATUSES: frozenset[str] = frozenset({"not_applicable", "single_expert"})
+
+# No measurement was obtained -> neutral prior.
+_NO_EVIDENCE_STATUSES: frozenset[str] = frozenset(
+    {"skipped", "insufficient_data", "no_gradient", "expert_count_unknown"}
+)
+
+# A measurement was attempted but is unusable -> no contribution (0.0).
+_UNUSABLE_EVIDENCE_STATUSES: frozenset[str] = frozenset(
+    {"error", "degenerate", "poor_fit", "invalid_evidence", "zero_weight"}
+)
+
+# Evidence state of a whole report. Distinguishes "no headroom" from
+# "no headroom measurement", which the headline score alone cannot express.
+EVIDENCE_STATE_NO_APPLICABLE = "no_applicable_signals"
+EVIDENCE_STATE_INSUFFICIENT = "insufficient_evidence"
+EVIDENCE_STATE_PARTIAL = "partial_coverage"
+EVIDENCE_STATE_FULL = "full_coverage"
+
 
 def _score_signal(signal: SignalResult) -> float | None:
     # Non-computed payloads carry no scoreable measurement: return the None
@@ -70,7 +105,14 @@ def _score_signal(signal: SignalResult) -> float | None:
         return 1.0 - (high_pressure_count / total)
 
     if signal.signal_name == "dead_neurons":
-        return float(1.0 - cast("DeadNeuronReport", data).dead_fraction)
+        dnr = cast("DeadNeuronReport", data)
+        if dnr.degenerate_criterion:
+            # Degenerate criterion: exact-zero amax never fires but
+            # near_zero_occupancy is high — do not present constant 1.0
+            # as a confident measurement. Return None so the neutral
+            # prior (0.5) applies instead of a fabricated score.
+            return None
+        return float(1.0 - dnr.dead_fraction)
 
     if signal.signal_name == "load_balance":
         balance_ratio = cast("LoadBalanceReport", data).balance_ratio
@@ -105,6 +147,15 @@ def compute_headroom_score(report: HeadroomReport) -> float:
     """Compute weighted composite headroom score from signal results. Iterates
     signals, skips not_applicable entirely (excluded from both numerator and denominator),
     scores each computed/skipped signal via _score_signal, applies DEFAULT_SIGNAL_WEIGHTS.
+
+    The composite is a PRIOR-MIXED EXPECTATION, not a measurement: a signal
+    that produced no scoreable value contributes the neutral prior 0.5, so an
+    unmeasured signal can never manufacture a 0.0 (or 1.0) headroom claim.
+    Signals excluded by architecture contribute neither numerator nor
+    denominator. The measured-only score, the coverage fraction, and the
+    uncertainty bounds live in compute_coverage_metrics — a composite number
+    alone is never a measurement.
+
     Returns weighted average of scores over applicable signals. Returns 0.0 if no
     signals or no applicable weight."""
     if not report.signals:
@@ -116,16 +167,58 @@ def compute_headroom_score(report: HeadroomReport) -> float:
     for signal in report.signals:
         # not_applicable and single_expert are excluded from the denominator
         # entirely (architecture cannot produce the measurement).
-        if signal.status in ("not_applicable", "single_expert"):
+        if signal.status in _EXCLUDED_STATUSES:
             continue
         weight = DEFAULT_SIGNAL_WEIGHTS.get(signal.signal_name, 0.1)
         score = _score_signal(signal)
-        if score is not None:
-            weighted_sum += weight * score
-        # Everything else non-computed (cat 3): 0.0 numerator, weight retained.
+        if score is None:
+            score = _unmeasured_contribution(signal.status)
+        weighted_sum += weight * score
         total_weight += weight
 
     return weighted_sum / total_weight if total_weight > 0 else 0.0
+
+
+def _unmeasured_contribution(status: str) -> float:
+    """Return the composite contribution of a signal that produced no scoreable
+    measurement. A status that carries no evidence contributes the neutral prior;
+    a status that carries unusable evidence contributes 0.0."""
+    if status in _UNUSABLE_EVIDENCE_STATUSES:
+        return 0.0
+    if status in _NO_EVIDENCE_STATUSES:
+        return NEUTRAL_PRIOR
+    return NEUTRAL_PRIOR
+
+
+def evidence_state(report: HeadroomReport) -> str:
+    """Classify the evidence state of a report.
+
+    Returns one of EVIDENCE_STATE_NO_APPLICABLE (no signal applies to this
+    architecture), EVIDENCE_STATE_INSUFFICIENT (signals apply but none was
+    measured), EVIDENCE_STATE_PARTIAL (some measured) or EVIDENCE_STATE_FULL
+    (every applicable signal measured). The state is what a report must
+    communicate when the composite score alone cannot: a report with no
+    measurements has no headroom value, only an absence of one."""
+    total_weight = 0.0
+    measured_weight = 0.0
+    for signal in report.signals:
+        if signal.status in _EXCLUDED_STATUSES:
+            continue
+        weight = DEFAULT_SIGNAL_WEIGHTS.get(signal.signal_name, 0.1)
+        total_weight += weight
+        # A signal counts as measured only when it was actually computed from
+        # measured source AND yields a scoreable value — the same definition
+        # compute_coverage_metrics uses, so evidence_state and coverage never
+        # disagree about what is "measured".
+        if _is_measured(signal) and _score_signal(signal) is not None:
+            measured_weight += weight
+    if total_weight <= 0.0:
+        return EVIDENCE_STATE_NO_APPLICABLE
+    if measured_weight <= 0.0:
+        return EVIDENCE_STATE_INSUFFICIENT
+    if measured_weight < total_weight:
+        return EVIDENCE_STATE_PARTIAL
+    return EVIDENCE_STATE_FULL
 
 
 def compute_coverage_metrics(report: HeadroomReport) -> CoverageMetrics:
@@ -156,12 +249,18 @@ def compute_coverage_metrics(report: HeadroomReport) -> CoverageMetrics:
     for signal in report.signals:
         # not_applicable and single_expert are not applicable to this
         # architecture; exclude them from the applicable-weight denominator.
-        if signal.status in ("not_applicable", "single_expert"):
+        if signal.status in _EXCLUDED_STATUSES:
             continue
         weight = DEFAULT_SIGNAL_WEIGHTS.get(signal.signal_name, 0.1)
         total_applicable_weight += weight
         if _is_measured(signal):
-            score = cast("float", _score_signal(signal))
+            score = _score_signal(signal)
+            # A signal whose computation is valid but whose evidence is
+            # non-discriminating (e.g. dead_neurons degenerate criterion)
+            # contributes no measured information and must not inflate the
+            # measured-only score or coverage.
+            if score is None:
+                continue
             weighted_sum_measured += weight * score
             measured_weight += weight
 
@@ -230,13 +329,18 @@ def _coverage_gate_gaps(report: HeadroomReport, coverage: float) -> list[str]:
     ):
         prov = report.metadata.get("gradient_provenance")
         prov_map: dict[str, Any] = prov if isinstance(prov, dict) else {}
-        if (
-            prov_map.get("model_revision") is None
-            or prov_map.get("dataset_hash") is None
-        ):
+        model_revision = prov_map.get("model_revision")
+        dataset_hash = prov_map.get("dataset_hash")
+        if model_revision is None or dataset_hash is None:
             gaps.append(
                 "gradient provenance incomplete: model_revision and dataset_hash "
                 "required for computed gradient-derived signals"
+            )
+        elif model_revision != report.model_name:
+            gaps.append(
+                "gradient provenance identity mismatch: model_revision "
+                f"{model_revision!r} does not match model being scored "
+                f"{report.model_name!r}"
             )
     weak_sampling = sorted(
         {
@@ -335,10 +439,24 @@ def generate_recommendations(report: HeadroomReport) -> list[str]:
             )
 
     metrics = compute_coverage_metrics(report)
-    if metrics.coverage < 0.5:
+    state = evidence_state(report)
+    unmeasured = sorted(
+        s.signal_name
+        for s in report.signals
+        if s.status not in _EXCLUDED_STATUSES and not _is_measured(s)
+    )
+    if state == EVIDENCE_STATE_INSUFFICIENT:
+        recommendations.append(
+            "INSUFFICIENT EVIDENCE: no signal was measured, so no headroom value "
+            "can be asserted for this model. The composite carries a neutral "
+            f"{NEUTRAL_PRIOR:.1f} prior for every applicable signal "
+            f"({', '.join(unmeasured)}) and is NOT a measurement."
+        )
+    elif metrics.coverage < 0.5:
         recommendations.append(
             f"Low measurement coverage ({metrics.coverage:.0%} measured). "
-            "Composite score mixes neutral priors for missing signals; "
+            "Composite score mixes a neutral 0.5 prior for unmeasured signals "
+            f"({', '.join(unmeasured)}); "
             f"measured-only score is {metrics.measured_score:.3f} "
             f"with possible range [{metrics.lower_bound:.3f}, {metrics.upper_bound:.3f}]."
         )
