@@ -101,6 +101,18 @@ class TestGetModuleFamilyVisionAndMTP:
     def test_vision_merger(self) -> None:
         assert get_module_family("model.visual.merger.weight") == "vision"
 
+    def test_visual_prefix_is_vision(self) -> None:
+        """A model.visual.* tower classifies as vision, not attention/ffn.
+
+        GAP-3 (2026-11-12 Ornith handoff): this checkpoint's vision prefix is
+        model.visual.*, which carries no 'vision' substring, so the 'attn' and
+        'mlp' tensors inside it were counted as attention/ffn and silently
+        inflated those families' coverage."""
+        assert get_module_family("model.visual.blocks.0.attn.qkv.weight") == "vision"
+        assert (
+            get_module_family("model.visual.blocks.0.mlp.gate_proj.weight") == "vision"
+        )
+
     def test_mtp(self) -> None:
         assert get_module_family("mtp.0.weight") == "mtp"
 

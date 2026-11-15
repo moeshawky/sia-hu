@@ -76,11 +76,17 @@ def _detect_model_format(model_path: str) -> Literal["huggingface", "gguf"]:
 
 
 def get_module_family(layer_name: str) -> ModuleFamily:
-    """Classify a layer name into a module family. Checks for vision, MTP, linear
-    attention, FFN/MLP, attention, state, embedding, lm_head, expert, and router
-    keywords in the lowercased layer name. Returns 'other' for unrecognized names.
-    Linear attention keywords checked first in FFN branch to avoid
+    """Classify a layer name into a module family. Checks for vision/visual, MTP,
+    linear attention, FFN/MLP, attention, state, embedding, lm_head, expert, and
+    router keywords in the lowercased layer name. Returns 'other' for unrecognized
+    names. Linear attention keywords checked first in FFN branch to avoid
     misclassification.
+
+    The vision branch matches 'visual' as well as 'vision', so a multimodal
+    checkpoint whose tower is named model.visual.* classifies those tensors as
+    vision instead of letting the 'attn'/'mlp' inside them silently inflate the
+    attention and ffn families. This is the same widening
+    detect_architecture_details already applies to the vision tower flag.
 
     Supports BERT-family naming (bert.encoder.layer.N.attention.self.query.weight →
     'attention'; bert.encoder.layer.N.intermediate.dense.weight → 'ffn';
@@ -89,7 +95,12 @@ def get_module_family(layer_name: str) -> ModuleFamily:
     identical naming. laya head weights without recognized keywords classify as
     'other'."""
     name = layer_name.lower()
-    if "vision" in name or "patch_embed" in name or "merger" in name:
+    if (
+        "visual" in name
+        or "vision" in name
+        or "patch_embed" in name
+        or "merger" in name
+    ):
         return "vision"
     if "mtp" in name or "nextn" in name:
         return "mtp"
@@ -396,11 +407,16 @@ def load_weight_pairs_from_json(
             return None
 
         for p in pairs_raw:
-            if not all(k in p for k in ("gradient", "weight", "layer_name")):
+            if not all(k in p for k in ("weight", "layer_name")):
                 continue
+            gradient_raw = p.get("gradient")
+            if gradient_raw is None:
+                gradient_tensor: torch.Tensor | None = None
+            else:
+                gradient_tensor = torch.tensor(gradient_raw, dtype=torch.float32)
             pairs.append(
                 GradientWeightPair(
-                    gradient=torch.tensor(p["gradient"], dtype=torch.float32),
+                    gradient=gradient_tensor,
                     weight=torch.tensor(p["weight"], dtype=torch.float32),
                     layer_name=p["layer_name"],
                     parent_shape=_pair_parent_shape(p.get("parent_shape")),
@@ -415,7 +431,7 @@ def load_weight_pairs_from_json(
 
     for pair in pairs:
         for field, tensor in (("gradient", pair.gradient), ("weight", pair.weight)):
-            if tensor.ndim != 2:
+            if tensor is not None and tensor.ndim != 2:
                 raise ValueError(
                     f"{json_path}: pair {pair.layer_name!r} field {field!r} has "
                     f"shape {list(tensor.shape)} (ndim {tensor.ndim}); weight "
@@ -697,7 +713,7 @@ def load_weight_pairs_diagnostic(json_path: str) -> LoadOutcome:
                     f"{_weight_pairs_format_hint()}"
                 ),
             )
-        missing = [k for k in ("gradient", "weight", "layer_name") if k not in p]
+        missing = [k for k in ("weight", "layer_name") if k not in p]
         if missing:
             return LoadOutcome(
                 data=None,
@@ -707,18 +723,28 @@ def load_weight_pairs_diagnostic(json_path: str) -> LoadOutcome:
                     f"{_weight_pairs_format_hint()}"
                 ),
             )
+        gradient_raw = p.get("gradient")
+        if gradient_raw is None:
+            gradient_tensor: torch.Tensor | None = None
+        else:
+            try:
+                gradient_tensor = torch.tensor(gradient_raw, dtype=torch.float32)
+            except (TypeError, ValueError) as e:
+                return LoadOutcome(
+                    data=None,
+                    error=f"pair {i} in {json_path}: cannot convert gradient to tensor: {e}",
+                )
         try:
-            gradient = torch.tensor(p["gradient"], dtype=torch.float32)
-            weight = torch.tensor(p["weight"], dtype=torch.float32)
+            weight_tensor = torch.tensor(p["weight"], dtype=torch.float32)
         except (TypeError, ValueError) as e:
             return LoadOutcome(
                 data=None,
-                error=f"pair {i} in {json_path}: cannot convert gradient/weight to tensors: {e}",
+                error=f"pair {i} in {json_path}: cannot convert weight to tensor: {e}",
             )
         pairs.append(
             GradientWeightPair(
-                gradient=gradient,
-                weight=weight,
+                gradient=gradient_tensor,
+                weight=weight_tensor,
                 layer_name=p["layer_name"],
                 parent_shape=_pair_parent_shape(p.get("parent_shape")),
                 truncated=(
@@ -729,7 +755,7 @@ def load_weight_pairs_diagnostic(json_path: str) -> LoadOutcome:
         )
     for pair in pairs:
         for field, tensor in (("gradient", pair.gradient), ("weight", pair.weight)):
-            if tensor.ndim != 2:
+            if tensor is not None and tensor.ndim != 2:
                 return LoadOutcome(
                     data=None,
                     error=(

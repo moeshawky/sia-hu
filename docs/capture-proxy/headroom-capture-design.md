@@ -43,6 +43,14 @@ contract-first design that implements it. Status: approved for implementation 20
   gradient array** of the weight's shape (R-03 effective rank uses weight only; R-04
   ratio is 0.0 for zero gradient — clean semantics). The proposal's "gradient null"
   wording is superseded by this measurement.
+
+  > **Superseded (2026-11-13):** ADR-002's premise no longer holds. `loader.py` now
+  > accepts a missing or null `gradient` (`gradient=None`, pair kept) instead of
+  > dropping the file, and `grad_weight_ratio` reports `signal_status: "no_gradient"`
+  > with a null ratio rather than scoring a fabricated zero as maximum headroom.
+  > The carrier emits `gradient: null` + `gradient_status: "not_captured"`; a
+  > zero-filled placeholder is not a measured gradient (`PROJECT-ROADMAP.md`:
+  > "Missing gradients stay missing"). See `docs/architecture/contract.md`.
 - **ADR-003 (tensor names):** measured `weight_map` of the target model uses
   `model.language_model.layers.{i}.mlp.{proj}_proj.weight` (Qwen3_5 conditional
   generation wrapper), not the proposal example's `model.layers.{i}...`. Resolution tries
@@ -89,10 +97,11 @@ write_async(*, capture_id: str, parent_raw: Path, model: str,
     # never raises; runs _write_sync via asyncio.to_thread
 ```
 `TensorLoader = Callable[[Path, str], TensorBundle | None]`,
-`TensorBundle = NamedTuple(weight: list[list[float]], gradient: list[list[float]])`.
+`TensorBundle = NamedTuple(weight: list[list[float]], gradient: list[list[float]] | None = None)`.
 Default loader: `model.safetensors.index.json` (or single-shard fallback) →
 `safe_open(shard, framework="pt")` → `get_tensor(name)` → `weight_scale_inv` dequant →
-`.float()` → `.numpy().tolist()` + zero gradient. Any exception → `None`.
+`.float()` → `.numpy().tolist()`; `gradient` stays `None` (the proxy serves inference
+and runs no training hook). Any exception → `None`.
 
 ### `HeadroomLogger` (headroom.py — CaptureLogger fork)
 ```

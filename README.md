@@ -37,7 +37,7 @@ See `docs/architecture/sia-hu-identity.md` for the full cosmology, and
 | `src/model_headroom/` | **Authority** — scores training headroom (reads Sia) | Never proxies |
 | `src/capture_proxy/` | **Carrier** — emits sidecar capture (emits Hu) | Never scores |
 
-Both are **tracked packages inside this single repo** — not submodules, not gitignored, not separate remotes. One clone carries the whole workspace: single `pyproject.toml`, single `uv.lock`, single ruff/mypy/pytest config, installed editable from the repo root, exposing `capture-proxy`, `model-headroom`, `model-headroom-refusal`, and `sia`.
+Both are **tracked packages inside this single repo** — not submodules, not gitignored, not separate remotes. One clone carries the whole workspace: single `pyproject.toml`, single `uv.lock`, single ruff/mypy/pytest config, installed editable from the repo root, exposing `capture-proxy`, `model-headroom`, `model-headroom-refusal`, `model-headroom-paired`, and `sia`.
 
 `model_headroom` is the sole scoring authority; `capture-proxy` emits artifacts in the format the authority consumes. Agreement between the two is the cross-check.
 
@@ -52,10 +52,13 @@ Both are **tracked packages inside this single repo** — not submodules, not gi
 | `sia capture-proxy` | `capture-proxy` | Carrier — emits Hu |
 | `sia model-headroom` | `model-headroom` | Authority — scores Sia |
 | `sia model-headroom-refusal` | `model-headroom-refusal` | Refusal analysis |
+| `sia model-headroom-paired` | `model-headroom-paired` | Paired-model recovery diagnostics |
+| `sia doctor` | `sia.doctor:main` | Read-only workspace preflight |
+| `sia publish` | `sia.publish:main` | Push current branch; verify remote ref never auto-commit |
 
 Each `main()` returns an `int` and only calls `sys.exit()` inside its
 `if __name__ == "__main__"` guard. Exit codes propagate. `sia` adds no flags,
-no behavior, no new subcommands beyond the three it aliases.
+no behavior, no new subcommands beyond the six it aliases.
 
 See `docs/guides/sia-cli.md` and `docs/reference/cli-flags.md`.
 
@@ -82,7 +85,7 @@ Verify chain details: `docs/operations/verify-chain.md`.
 sia-hu/
   README.md            → this file
   AGENTS.md            → agent/operator gate (gitignored, on disk)
-  PROJECT-ROADMAP.md   → unified `sia` CLI plan, phases 1-2
+  PROJECT-ROADMAP.md   → unified `sia` CLI plan, phases 1-5
   pyproject.toml       → single project (sia-hu); one lockfile
   src/                 → source packages (capture_proxy, model_headroom, sia)
   capture-proxy/       → carrier tests, config, scripts (docs moved to docs/)

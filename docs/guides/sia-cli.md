@@ -32,6 +32,7 @@ dispatcher. Exit codes propagate.
 | `sia capture-proxy` | `capture-proxy` | Carrier — emits Hu (capture artifacts) |
 | `sia model-headroom` | `model-headroom` | Authority — scores Sia (headroom analysis) |
 | `sia model-headroom-refusal` | `model-headroom-refusal` | Refusal analysis |
+| `sia model-headroom-paired` | `model-headroom-paired` | Paired-model recovery diagnostics (compare, decide, verify, schema-version) |
 | `sia doctor` | `sia.doctor:main` | Read-only workspace preflight |
 | `sia publish` | `sia.publish:main` | Push current branch; verify remote ref never auto-commits |
 
@@ -60,7 +61,7 @@ scripts. `sia doctor`/`sia publish` are `sia`-owned only.
 ## Usage
 
 ```bash
-# List subcommands (now five)
+# List subcommands (now six)
 sia --help
 
 # Run a subcommand with its own flags

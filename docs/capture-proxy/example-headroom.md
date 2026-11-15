@@ -113,10 +113,11 @@ python -m model_headroom \
   --output-format json | python -m json.tool
 ```
 
-Weight-only pairs carry a real zero-gradient array of the weight's shape
-(ADR-002; `src/capture_proxy/headroom.py:393`): the effective-rank signal
-scores from the weight, and the grad/weight ratio comes back 0.0 without
-a training hook.
+Weight-only pairs carry `gradient: null` plus `gradient_status:
+"not_captured"` (ADR-002 as superseded 2026-11-13): the effective-rank signal
+scores from the weight, and `grad_weight_ratio` reports `signal_status:
+"no_gradient"` with a null ratio rather than treating absent evidence as a
+maximum score.
 
 ## 5. Off by default
 

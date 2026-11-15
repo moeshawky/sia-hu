@@ -110,7 +110,7 @@ class TestDefaultLoaderRealIO:
             bundle.weight
             == torch.arange(32, dtype=torch.float32).reshape(4, 8).tolist()
         )
-        assert bundle.gradient == [[0.0] * 8 for _ in range(4)]
+        assert bundle.gradient is None
         assert bundle.parent_shape == (4, 8)
         assert bundle.truncated is False
 
@@ -249,6 +249,8 @@ class TestCapturePairsRealIO:
         first = pairs[0]
         assert first["layer_name"] == GATE_2D
         assert first["expert_id"] == 0
+        assert first["gradient"] is None
+        assert first["gradient_status"] == "not_captured"
 
     def test_fused_only_dir_emits_per_expert_ids(
         self, tmp_path: Path, stack: tuple[Any, Any]

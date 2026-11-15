@@ -414,6 +414,114 @@ class TestCliGGUFWeightSamples:
         assert sampler_calls == []
 
 
+class TestCliSafetensorsWeightSamples:
+    """GAP-1 (2026-11-12 Ornith handoff): the CLI could only sample GGUF weights,
+    so R-03 was always skipped for a safetensors checkpoint."""
+
+    def _checkpoint(self, tmp_path: Any, rows: int = 64, cols: int = 12) -> Any:
+        import torch
+        from safetensors.torch import save_file
+
+        directory = tmp_path / "ckpt"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "config.json").write_text(
+            json.dumps(
+                {
+                    "model_type": "llama",
+                    "architectures": ["LlamaForCausalLM"],
+                    "hidden_size": cols,
+                    "intermediate_size": rows,
+                    "num_hidden_layers": 3,
+                }
+            )
+        )
+        tensors = {
+            f"model.layers.{layer}.mlp.gate_proj.weight": torch.randn(rows, cols)
+            for layer in range(3)
+        }
+        save_file(tensors, str(directory / "model.safetensors"))
+        return directory
+
+    def test_directory_without_safetensors_returns_none(self, tmp_path: Any) -> None:
+        from model_headroom.cli import _safetensors_weight_samples
+
+        (tmp_path / "empty").mkdir()
+        assert (
+            _safetensors_weight_samples(
+                str(tmp_path / "empty"), "single_tile", None, "cpu"
+            )
+            is None
+        )
+
+    def test_checkpoint_returns_weight_samples_with_full_parent_shape(
+        self, tmp_path: Any
+    ) -> None:
+        from model_headroom.cli import _safetensors_weight_samples
+        from model_headroom.models.types import WeightSample
+
+        directory = self._checkpoint(tmp_path)
+        result = _safetensors_weight_samples(str(directory), "single_tile", 8, "cpu")
+        assert result is not None
+        assert result
+        for sample in result:
+            assert isinstance(sample, WeightSample)
+            assert sample.parent_shape == (64, 12)
+            assert sample.truncated is True
+            assert sample.sampling_mode == "single_tile"
+        assert {s.layer_name for s in result} == {
+            "model.layers.0.mlp.gate_proj.weight",
+            "model.layers.1.mlp.gate_proj.weight",
+            "model.layers.2.mlp.gate_proj.weight",
+        }
+
+    def test_checkpoint_without_mlp_projection_returns_none(
+        self, tmp_path: Any, capsys: Any
+    ) -> None:
+        import torch
+        from safetensors.torch import save_file
+
+        from model_headroom.cli import _safetensors_weight_samples
+
+        directory = tmp_path / "ckpt"
+        directory.mkdir()
+        save_file(
+            {"model.layers.0.self_attn.q_proj.weight": torch.randn(8, 8)},
+            str(directory / "model.safetensors"),
+        )
+        assert (
+            _safetensors_weight_samples(str(directory), "single_tile", None, "cpu")
+            is None
+        )
+        err = capsys.readouterr().err
+        assert "no safetensors weight samples" in err
+
+    def test_cli_computes_effective_rank_for_safetensors_checkpoint(
+        self, tmp_path: Any
+    ) -> None:
+        from model_headroom.cli import main
+
+        directory = self._checkpoint(tmp_path)
+        out_file = tmp_path / "report.json"
+        result = main(
+            [
+                "--model-name",
+                "probe",
+                "--model-path",
+                str(directory),
+                "--weight-pairs-source-type",
+                "measured",
+                "--output-format",
+                "json",
+                "--output-file",
+                str(out_file),
+            ]
+        )
+        assert result == 0
+        report = json.loads(out_file.read_text())
+        statuses = {s["signal_name"]: s["status"] for s in report["signals"]}
+        assert statuses["effective_rank"] == "computed"
+
+
 class TestCliDataFileErrorMessages:
     """The CLI must print an instructive error (cause + path + flag + expected
     format + example location) for every data-file failure, never a bare path."""

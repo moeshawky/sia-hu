@@ -1,7 +1,7 @@
-# CLI flags — all three CLIs plus `sia`
+# CLI flags — all four CLIs plus `sia`
 
 **Purpose:** Complete flag reference for `capture-proxy`, `model-headroom`,
-`model-headroom-refusal`, and the unified `sia` CLI. Cross-references
+`model-headroom-refusal`, `model-headroom-paired`, and the unified `sia` CLI. Cross-references
 `guides/sia-cli.md` (dispatch behavior), `guides/capture-proxy.md` (carrier usage),
 `guides/model-headroom.md` (authority usage), and `reference/env-vars.md` (env var
 equivalents). No Python code changes are proposed here.
@@ -98,17 +98,18 @@ Refusal analysis CLI. Entry point: `model-headroom-refusal = "model_headroom.ref
 `sia` has no flags of its own. It dispatches via subcommands:
 
 ```bash
-sia --help                    # lists all five subcommands
+sia --help                    # lists all six subcommands
 sia <subcommand> --help       # shows the underlying CLI's help
 sia capture-proxy <args>      # forwards to capture_proxy.__main__:main
 sia model-headroom <args>     # forwards to model_headroom.cli:main
 sia model-headroom-refusal <args>   # forwards to model_headroom.refusal.cli:main
+sia model-headroom-paired <args>    # forwards to model_headroom.paired.cli:main
 sia doctor <args>             # forwards to sia.doctor:main (read-only preflight)
 sia publish <args>            # forwards to sia.publish:main (push + verify, never auto-commits)
 ```
 
 Exit codes propagate from the underlying CLI. `sia` adds no flags, no behavior,
-no new subcommands beyond the five it dispatches. `doctor` and `publish` are
+no new subcommands beyond the six it dispatches. `doctor` and `publish` are
 `sia`-owned verbs; they do not modify existing CLIs.
 
 | `sia` subcommand | Module | Role |
@@ -116,6 +117,7 @@ no new subcommands beyond the five it dispatches. `doctor` and `publish` are
 | `sia capture-proxy` | `capture_proxy.__main__:main` | Carrier — emits Hu (capture artifacts) |
 | `sia model-headroom` | `model_headroom.cli:main` | Authority — scores Sia (headroom analysis) |
 | `sia model-headroom-refusal` | `model_headroom.refusal.cli:main` | Refusal analysis |
+| `sia model-headroom-paired` | `model_headroom.paired.cli:main` | Paired-model recovery diagnostics (compare, decide, verify, schema-version) |
 | `sia doctor` | `sia.doctor:main` | Read-only workspace preflight; exit 0/1/2 |
 | `sia publish` | `sia.publish:main` | Push current branch; verify remote ref matches local HEAD; never auto-commits; `--dry-run`/`--allow-dirty`; credential URLs redacted |
 

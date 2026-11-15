@@ -13,10 +13,10 @@ pip install -e ".[headroom]"   # torch / numpy / safetensors
 pip install -e ".[dev,headroom,gguf]"   # everything
 ```
 
-Requires Python ≥3.12, `torch>=2.15`, `numpy>=2.5.4`. Package version 0.3.0.
+Requires Python ≥3.12, `torch>=2.15`, `numpy>=2.5.4`. Package version 0.5.0.
 `pip install -e .` alone installs the carrier-free base package; the heavy
 scoring deps live in the `headroom` extra, which is what keeps a carrier-only
-install from pulling torch. Entry points: `model-headroom`, `model-headroom-refusal`.
+install from pulling torch. Entry points: `model-headroom`, `model-headroom-refusal`, `model-headroom-paired`.
 
 ## Usage
 

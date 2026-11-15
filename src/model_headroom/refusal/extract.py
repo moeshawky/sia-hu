@@ -128,7 +128,9 @@ def orthogonalize_against(
 
 
 def project_out(
-    residual: torch.Tensor, direction: torch.Tensor, strength: float = 1.0
+    residual: torch.Tensor,
+    direction: torch.Tensor,
+    strength: float | torch.Tensor = 1.0,
 ) -> torch.Tensor:
     """Subtract ``strength`` times the ``direction`` component from ``residual``.
 

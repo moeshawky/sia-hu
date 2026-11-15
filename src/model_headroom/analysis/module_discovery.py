@@ -26,6 +26,9 @@ class ModuleInfo:
     has_weight: bool
     has_bias: bool
     children: list[str] = field(default_factory=list)
+    buffer_count: int = 0
+    buffer_elements: int = 0
+    has_buffer_weight: bool = False
 
 
 @dataclass(frozen=True)
@@ -58,19 +61,27 @@ def discover_modules(model: Any) -> list[ModuleInfo]:
     for name, mod in model.named_modules():
         if name == "":
             continue
-        # Only leaf modules (no children) with parameters
+        # Only leaf modules with parameters or buffers
         children = [c for c in all_paths if c.startswith(name + ".") and c != name]
         is_leaf = len(children) == 0
-        params = list(mod.parameters(recurse=False))
-        if not params and not is_leaf:
+        if not is_leaf:
             continue
-        if not params:
+        params = list(mod.parameters(recurse=False))
+        buffers = list(mod.buffers(recurse=False))
+        if not params and not buffers:
             continue
 
         param_count = sum(p.numel() for p in params)
         trainable = any(p.requires_grad for p in params)
-        has_weight = any("weight" in n for n, _ in mod.named_parameters(recurse=False))
+        param_has_weight = any(
+            "weight" in n for n, _ in mod.named_parameters(recurse=False)
+        )
+        buffer_names = [n for n, _ in mod.named_buffers(recurse=False)]
+        buffer_has_weight = "weight" in buffer_names
+        has_weight = param_has_weight or buffer_has_weight
         has_bias = any("bias" in n for n, _ in mod.named_parameters(recurse=False))
+        buffer_count = len(buffers)
+        buffer_elements = sum(b.numel() for b in buffers)
 
         modules.append(
             ModuleInfo(
@@ -82,6 +93,9 @@ def discover_modules(model: Any) -> list[ModuleInfo]:
                 has_weight=has_weight,
                 has_bias=has_bias,
                 children=children,
+                buffer_count=buffer_count,
+                buffer_elements=buffer_elements,
+                has_buffer_weight=buffer_has_weight,
             )
         )
 
@@ -237,22 +251,23 @@ def _build_candidate(
 
     trainable = sum(m.param_count for m in target_modules)
     frozen = sum(m.param_count for m in all_modules) - trainable
-    # LoRA adapter: A (d x r) + B (r x d) per target = 2 * r * d per module
-    adapter_bytes = (
-        sum(
-            2 * rank * m.param_count // max(m.param_count, 1) * 4
-            for m in target_modules
-        )
-        * 0
-    )  # placeholder
-    # Better estimate: r * (in_features + out_features) * 4 bytes per module
     adapter_bytes = 0
+    buffer_backed: list[str] = []
     for m in target_modules:
-        # Estimate from param_count: assume square-ish, adapter = 2 * rank * sqrt(params) * 4
         import math
 
-        side = int(math.sqrt(max(m.param_count, 1)))
-        adapter_bytes += 2 * rank * side * 4
+        if m.param_count > 0:
+            side = int(math.sqrt(max(m.param_count, 1)))
+            adapter_bytes += 2 * rank * side * 4
+        elif m.buffer_elements > 0:
+            side = int(math.sqrt(max(m.buffer_elements, 1)))
+            adapter_bytes += 2 * rank * side * 4
+            buffer_backed.append(m.path)
+    if buffer_backed:
+        assumptions.append(
+            f"byte estimate for buffer-backed modules ({', '.join(buffer_backed)}) "
+            "derived from buffer element count, not parameter count"
+        )
 
     # Family coverage
     family_counts: dict[str, int] = {}

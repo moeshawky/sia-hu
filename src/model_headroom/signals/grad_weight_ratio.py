@@ -2,7 +2,7 @@
 
 ratio = ||gradient||_2 / ||weight||_2.
 Threshold: ratio > mean + 2*std across all layers = high pressure.
-No division by zero (returns ratio=0.0 for zero weights).
+No division by zero (returns None for missing or zero gradient).
 
 Dependencies: torch (norm computation), models.types (GradientWeightPair, GradWeightRatio).
 Provides: analyze_grad_weight_ratios().
@@ -11,6 +11,7 @@ Provides: analyze_grad_weight_ratios().
 from __future__ import annotations
 
 import math
+from typing import cast
 
 import torch
 
@@ -35,16 +36,18 @@ def analyze_grad_weight_ratios(
         Each ratio >= 0.0. is_high_pressure=True if ratio > mean + 2*std.
 
     Output contract (zero weight):
-        signal_status="zero_weight", ratio=0.0, z_score=0.0.
+        signal_status="zero_weight", ratio=None, z_score=None,
+        is_high_pressure=None.
 
-    Output contract (no gradient):
-        signal_status="no_gradient", ratio=0.0, z_score=0.0.
+    Output contract (no gradient — missing or all-zero):
+        signal_status="no_gradient", ratio=None, z_score=None,
+        is_high_pressure=None.
 
     Output contract (error):
         signal_status="error", error_message describes the failure.
 
     Invariants:
-        - All ratios >= 0.0
+        - All computed ratios >= 0.0
         - z_score is 0.0 when std is zero across layers
         - len(result) == len(pairs)
 
@@ -54,45 +57,59 @@ def analyze_grad_weight_ratios(
         return []
 
     results: list[GradWeightRatio] = []
-    ratios: list[float] = []
+    ratios: list[float | None] = []
 
     for pair in pairs:
         weight_norm = torch.norm(pair.weight.to(device)).item()
+
+        if pair.gradient is None:
+            results.append(
+                GradWeightRatio(
+                    ratio=None,
+                    is_high_pressure=None,
+                    z_score=None,
+                    layer_name=pair.layer_name,
+                    signal_status="no_gradient",
+                )
+            )
+            ratios.append(None)
+            continue
+
         grad_norm = torch.norm(pair.gradient.to(device)).item()
 
         if weight_norm == 0.0:
             results.append(
                 GradWeightRatio(
-                    ratio=0.0,
-                    is_high_pressure=False,
-                    z_score=0.0,
+                    ratio=None,
+                    is_high_pressure=None,
+                    z_score=None,
                     layer_name=pair.layer_name,
                     signal_status="zero_weight",
                 )
             )
-            ratios.append(0.0)
+            ratios.append(None)
         elif grad_norm == 0.0:
             results.append(
                 GradWeightRatio(
-                    ratio=0.0,
-                    is_high_pressure=False,
-                    z_score=0.0,
+                    ratio=None,
+                    is_high_pressure=None,
+                    z_score=None,
                     layer_name=pair.layer_name,
                     signal_status="no_gradient",
                 )
             )
-            ratios.append(0.0)
+            ratios.append(None)
         elif not math.isfinite(grad_norm):
             results.append(
                 GradWeightRatio(
-                    ratio=0.0,
-                    is_high_pressure=False,
-                    z_score=0.0,
+                    ratio=None,
+                    is_high_pressure=None,
+                    z_score=None,
                     layer_name=pair.layer_name,
                     signal_status="invalid_evidence",
                 )
             )
-            ratios.append(0.0)
+            ratios.append(None)
         else:
             ratio = grad_norm / weight_norm
             ratios.append(ratio)
@@ -107,7 +124,7 @@ def analyze_grad_weight_ratios(
             )
 
     # Compute mean and std of all computed ratios
-    valid_ratios = [r for r in ratios if r > 0.0]
+    valid_ratios = [r for r in ratios if r is not None and r > 0.0]
     if not valid_ratios:
         return results
 
@@ -118,8 +135,9 @@ def analyze_grad_weight_ratios(
     # Update is_high_pressure and z_score for computed results
     for i, result in enumerate(results):
         if result.signal_status == "computed":
-            z = (ratios[i] - mean_r) / std_r if std_r > 0 else 0.0
-            is_high = ratios[i] > mean_r + 2 * std_r
+            ratio_i = cast("float", ratios[i])
+            z = (ratio_i - mean_r) / std_r if std_r > 0 else 0.0
+            is_high = ratio_i > mean_r + 2 * std_r
             results[i] = GradWeightRatio(
                 ratio=result.ratio,
                 is_high_pressure=is_high,

@@ -38,7 +38,7 @@ A logit lens that reads Sia before it becomes Hu is a 1-to-1 conceptual match:
 sia-hu/
   README.md                 → project overview
   PROJECT-ROADMAP.md        → unified `sia` CLI plan, phases 1-2
-  pyproject.toml            → single project, sia-hu 0.3.0
+  pyproject.toml            → single project, sia-hu 0.5.0
   sia doctor                → read-only workspace preflight (no commit/push)
   sia publish               → push current branch, verify remote ref, never auto-commit
   src/capture_proxy/        → carrier package (tests/ too)
@@ -61,13 +61,15 @@ Start here, then follow the section that matches your question:
 | source_type / verification_status, measured vs synthetic data | `concepts/provenance.md` |
 | Frozen dataclasses, invariants, NFR-01 (accelerator-preferred weights) | `concepts/frozen-contracts.md` |
 | Install, bootstrap `--doctor`, verify chain | `guides/quickstart.md` |
-| Unified `sia` CLI — subcommands, forwarding, exit codes | `guides/sia-cli.md` |
+| Unified `sia` CLI — six subcommands (capture-proxy, model-headroom, model-headroom-refusal, model-headroom-paired, doctor, publish), forwarding, exit codes | `guides/sia-cli.md` |
+| Paired-model recovery diagnostics (compare, decide, verify, schema-version) | `guides/paired-model-recovery.md` |
+| Runtime refusal ablation — artifact, hook, artifact schema, engine integration | `guides/runtime-refusal-ablation.md` |
 | Carrier usage: start proxy, route through it, capture paths | `guides/capture-proxy.md` |
 | Authority usage: run analysis, signals, output formats | `guides/model-headroom.md` |
 | Verify chain: ruff → format → mypy → pytest | `operations/verify-chain.md` |
 | uv commands, bootstrap scripts, environment setup | `operations/dev-commands.md` |
 | GPU/CPU/TPU notes, T4 measurements, transformers ceiling | `operations/environment.md` |
-| All three CLIs' flags (capture-proxy, model-headroom, model-headroom-refusal, sia) | `reference/cli-flags.md` |
+| All four CLIs' flags plus `sia` (capture-proxy, model-headroom, model-headroom-refusal, model-headroom-paired, sia) | `reference/cli-flags.md` |
 | All env vars (CAPTURE_* and model_headroom vars) | `reference/env-vars.md` |
 | Directory structure of the repo | `reference/file-layout.md` |
 

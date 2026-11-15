@@ -26,7 +26,7 @@ is an echo.
 | File | Path pattern | Format | Authority consumer |
 |------|-------------|--------|-------------------|
 | Sidecar | `{headroom_dir}/YYYY-MM-DD/{capture_id}.headroom.json` | JSON (authoritative artifact, written last) | `model_headroom` loader contract |
-| Weight pairs | `{headroom_dir}/YYYY-MM-DD/{capture_id}-weight_pairs.json` | Compact JSON | `loader.py:398` `load_weight_pairs_from_json` |
+| Weight pairs | `{headroom_dir}/YYYY-MM-DD/{capture_id}-weight_pairs.json` | Compact JSON | `loader.py` `load_weight_pairs_from_json` |
 
 **Sidecar contents (`HeadroomRef`, written into `CaptureRecord.headroom`):**
 
@@ -42,11 +42,17 @@ is an echo.
 | `task` | str \| None | Task label from `CAPTURE_MODEL_TASKS` (additive, schema v6) |
 
 **Weight pairs contract (consumed by `load_weight_pairs_from_json`):**
-- Every pair has `gradient`, `weight`, `layer_name` keys
-- `gradient` and `weight` are 2-D float arrays
-- `gradient` has the same shape as `weight`
-- Missing `gradient`/`weight`/`layer_name` → pair skipped
-- Weight-only capture emits a real zero-gradient array of the weight's shape (ADR-002)
+- Every pair has `weight` and `layer_name` keys, plus `gradient` (nullable),
+  `gradient_status`, `expert_id`, `parent_shape`, `truncated`, `sampling_mode`
+- `weight` is a 2-D float array; `gradient` is a 2-D float array when captured,
+  else `null`
+- When captured, `gradient` has the same shape as `weight`
+- Missing `weight`/`layer_name` → pair skipped; missing or null `gradient` →
+  pair kept with `gradient=None`
+- `gradient_status` is `"captured"` or `"not_captured"`, derived from the value
+- Weight-only capture emits `gradient: null` + `gradient_status: "not_captured"` —
+  a zero-filled placeholder is not a measured training gradient
+  (`PROJECT-ROADMAP.md`: "Missing gradients stay missing")
 
 **Eligibility for sidecar emission:**
 - Writer enabled (`CAPTURE_HEADROOM` not `off`)
@@ -67,7 +73,7 @@ is an echo.
 
 | Item | Authority source | Carrier conforms by |
 |------|-----------------|---------------------|
-| 2-D pair contract | `loader.py:398` `load_weight_pairs_from_json` | Emitting pairs with `gradient`/`weight`/`layer_name`, 2-D arrays, matching shapes |
+| 2-D pair contract | `loader.py` `load_weight_pairs_from_json` | Emitting pairs with `weight`/`layer_name` plus nullable `gradient`, 2-D arrays, matching shapes when captured |
 | Signal names | `names.py` `SIGNAL_KEYS` (authority's core-6 verbatim) | Using `SIGNAL_KEYS` as sidecar signal keys |
 | Signal semantics | `models/types.py` frozen dataclasses | Never inventing a signal meaning; `null` = unproduced, never healthy-zero |
 | Frozen dataclass invariants | `models/types.py` (21 frozen dataclasses) | Never mutating; constructing new instances only |
@@ -112,9 +118,11 @@ Version bumps are additive — older records without new keys still validate.
    as a healthy measurement (the `60e0e4c` lesson).
 4. **R-01 off-mode purity.** With `CAPTURE_HEADROOM=off`, the carrier imports neither
    torch, nor safetensors, nor model_headroom. Zero bytes on the hot path.
-5. **Weight-only pairs carry real zero gradients.** Not null — a real zero-gradient
-   array of the weight's shape, so effective_rank scores from weight and
-   grad/weight ratio returns 0.0 cleanly.
+5. **Weight-only pairs carry `gradient: null`.** Never a fabricated zero array —
+   a zero-filled placeholder is not a measured training gradient. The pair also
+   carries `gradient_status: "not_captured"`; effective_rank scores from the
+   weight, and `grad_weight_ratio` reports `signal_status: "no_gradient"` with
+   `ratio: null` rather than inverting absent evidence into a maximum score.
 6. **The sidecar is authoritative.** If the sidecar file is missing, the background
    write did not complete; the ref path is precomputed and the sidecar is the source
    of truth.

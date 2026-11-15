@@ -22,8 +22,9 @@ Invariants:
     serialized to JSON; GPU residency buys nothing because the payload leaves
     the process as JSON anyway
   - weight-pair files keep the model_headroom loader contract: every pair
-    carries gradient, weight, and layer_name (zero-gradient arrays when no
-    training hook exists), plus parent_shape, truncated, and sampling_mode on
+    carries gradient, weight, and layer_name (gradient is null because the
+    proxy serves inference and never observes a training gradient), plus
+    parent_shape, truncated, and sampling_mode on
     every pair whether or not the byte cap fired, so a capped tile is never
     indistinguishable downstream from a whole matrix
   - every pair also carries expert_id: the expert index parsed from the
@@ -122,19 +123,20 @@ def _capture_projs(
 
 
 class TensorBundle(NamedTuple):
-    """A weight tensor and its (zero) gradient as float32 nested lists.
+    """A weight tensor and its gradient as float32 nested lists.
 
     Attributes:
         weight: 2-D float list (rows x cols), dequantized to float32.
-        gradient: 2-D float list, same shape as weight; zeros when no
-            training hook produced a real gradient.
+        gradient: 2-D float list, same shape as weight; None when no
+            training hook produced a real gradient (the proxy serves
+            inference, so this is always None).
         parent_shape: Shape of the tensor as read from the checkpoint, before
             any byte-cap row slice. None when the loader reports no shape.
         truncated: True when the byte cap actually cut rows from this tensor.
     """
 
     weight: list[list[float]]
-    gradient: list[list[float]]
+    gradient: list[list[float]] | None = None
     parent_shape: tuple[int, int] | None = None
     truncated: bool = False
 
@@ -658,12 +660,11 @@ def _tensor_to_bundle(
         elif rows_fit < 1 and rows > 0:
             return None
     weight = tensor_2d.numpy().tolist()
-    gradient = torch_mod.zeros_like(tensor_2d).numpy().tolist()
     if not weight or not weight[0]:
         return None
     return TensorBundle(
         weight=weight,
-        gradient=gradient,
+        gradient=None,
         parent_shape=parent_shape,
         truncated=truncated,
     )
@@ -765,7 +766,7 @@ def _default_tensor_loader(
     *,
     byte_budget: int | None = None,
 ) -> TensorBundle | None:
-    """Load one weight tensor (dequantized to float32) plus a zero gradient.
+    """Load one weight tensor (dequantized to float32) with no gradient.
 
     Reads the shard holding tensor_name via safetensors.torch.safe_open with
     framework="pt" and device="cpu". CPU is the correct device here because the
@@ -773,9 +774,9 @@ def _default_tensor_loader(
     to copy it back is a net loss. When a matching
     weight_scale_inv side tensor exists (fp8 checkpoints), the weight is
     dequantized by elementwise multiplication before the float32 cast.
-    The gradient is a zero array of the weight's shape: the model_headroom
-    loader requires the gradient key on every pair, and a zero gradient
-    scores the grad/weight ratio as 0.0 without a training hook.
+    The gradient is always None: the proxy serves inference and there is no
+    gradient-producing code path, so a zero array would be a fabrication,
+    not a measurement.
 
     For 3-D fused expert tensors this returns the expert-0 slice; use
     _default_tensor_loader_all for the full per-expert fan-out.
@@ -789,7 +790,7 @@ def _default_tensor_loader(
             Python-object allocation is bounded by the cap.
 
     Returns:
-        TensorBundle | None: Weight and zero gradient as float32 nested
+        TensorBundle | None: Weight and gradient=None as float32 nested
             lists; None when torch/safetensors are unimportable, the tensor
             is absent from the index or shard, or any read error occurs.
 
@@ -1134,7 +1135,8 @@ class HeadroomWriter:
                             )
                             continue
                         weight = weight[:rows_fit]
-                        gradient = gradient[:rows_fit]
+                        if gradient is not None:
+                            gradient = gradient[:rows_fit]
                         payload_bytes = rows_fit * cols * 4
                         pair_truncated = pair_truncated or rows_fit < rows_before
                         truncated = True
@@ -1146,6 +1148,9 @@ class HeadroomWriter:
                     {
                         "weight": weight,
                         "gradient": gradient,
+                        "gradient_status": "not_captured"
+                        if gradient is None
+                        else "captured",
                         "layer_name": name,
                         "expert_id": expert_idx,
                         "parent_shape": (

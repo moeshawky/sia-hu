@@ -167,7 +167,16 @@ def compute_coherence_for_layer(
             signal_status="insufficient_data",
             error_message="need >=2 gradient batches of the same layer",
         )
-    names = [p.layer_name for p in pairs]
+    measured = [(p.layer_name, p.gradient) for p in pairs if p.gradient is not None]
+    if len(measured) < 2:
+        return GradientCoherenceReport(
+            mean_cosine_similarity=0.0,
+            subspace_overlap=0.0,
+            variance_spectrum=0.0,
+            signal_status="insufficient_data",
+            error_message="need >=2 gradient batches of the same layer",
+        )
+    names = [n for n, _ in measured]
     return compute_gradient_coherence(
-        [p.gradient for p in pairs], layer_names=names, device=device
+        [g for _, g in measured], layer_names=names, device=device
     )

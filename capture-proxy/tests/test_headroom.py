@@ -90,8 +90,7 @@ def _fake_loader(rows: int = 4, cols: int = 3, delay: float = 0.0):
         if delay:
             time.sleep(delay)
         weight = [[float(i * cols + j) for j in range(cols)] for i in range(rows)]
-        gradient = [[0.0] * cols for _ in range(rows)]
-        return TensorBundle(weight=weight, gradient=gradient)
+        return TensorBundle(weight=weight, gradient=None)
 
     return loader
 
@@ -518,6 +517,7 @@ class TestHeadroomWriterUnit:
         # keys and the DEFER-4 expert_id key on every pair.
         assert set(pair.keys()) == {
             "gradient",
+            "gradient_status",
             "weight",
             "layer_name",
             "expert_id",
@@ -529,9 +529,8 @@ class TestHeadroomWriterUnit:
         assert pair["expert_id"] is None
         assert len(pair["weight"]) == 2
         assert len(pair["weight"][0]) == 3
-        assert len(pair["gradient"]) == 2
-        assert len(pair["gradient"][0]) == 3
-        assert pair["gradient"] == [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+        assert pair["gradient"] is None
+        assert pair["gradient_status"] == "not_captured"
         assert sidecar["bytes_written"] == 2 * 3 * 4
         assert sidecar["truncated"] is False
         assert sidecar["error_body"] is None
@@ -588,7 +587,7 @@ class TestHeadroomWriterUnit:
             "pairs"
         ]
         assert len(pairs[0]["weight"]) == 3
-        assert len(pairs[0]["gradient"]) == 3
+        assert pairs[0]["gradient"] is None
 
     def test_truncation_cap_below_one_row(self, tmp_path):
         # 10x4 weight = 160 B; cap 8 -> even one row (16 B) does not fit.
@@ -985,6 +984,7 @@ class TestHeadroomIntegration:
         pairs = json.loads(Path(weight_ref).read_text())["pairs"]
         assert set(pairs[0].keys()) == {
             "gradient",
+            "gradient_status",
             "weight",
             "layer_name",
             "expert_id",

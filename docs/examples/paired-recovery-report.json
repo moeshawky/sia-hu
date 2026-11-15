@@ -1,0 +1,29 @@
+{
+  "strategies": [
+    {
+      "strategy": "targeted_low_rank",
+      "metric_direction": "lower_is_better",
+      "intervention_id": "base-qwen-dense->post-qwen-dense",
+      "observed_delta": -0.22999999999999998,
+      "held_out_keys": [
+        "encoder.layer0.mlp.normalized_reconstruction_error"
+      ],
+      "affected_families": [],
+      "memory_overhead_gb": null,
+      "parameter_overhead": null,
+      "uncertainty": 0.09999999999999998,
+      "coverage": 0.9,
+      "verdict": "SUPPORTED",
+      "verdict_reason": "improvement on held-out measurement (raw delta -0.22999999999999998, direction=lower_is_better)",
+      "missing_evidence": [
+        "memory budget",
+        "parameter overhead"
+      ],
+      "next_experiment": "Re-run the held-out measurement on encoder.layer0.mlp.normalized_reconstruction_error with metric_direction=lower_is_better; refute the strategy if mean delta is not strictly less than 0.0.",
+      "downgrade_reasons": []
+    }
+  ],
+  "distinguishable": false,
+  "summary": "Single strategy evaluated.",
+  "warnings": []
+}

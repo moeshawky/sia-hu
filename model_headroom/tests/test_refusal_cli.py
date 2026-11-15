@@ -466,3 +466,243 @@ class TestSglangPath:
             ]
         )
         assert rc == 1
+
+
+class TestSafetensorsOutput:
+    def _safe_open(self, path):
+        try:
+            from safetensors import safe_open
+        except ImportError:
+            pytest.skip("safetensors not installed")
+        return safe_open(str(path), framework="pt")
+
+    def test_safetensors_writes_loadable_artifact(self, tmp_path) -> None:
+        harmful, harmless = _pairs(tmp_path)
+        out = tmp_path / "direction.safetensors"
+        rc = main(
+            [
+                "--harmful-activations",
+                str(harmful),
+                "--harmless-activations",
+                str(harmless),
+                "--output-format",
+                "safetensors",
+                "--output-file",
+                str(out),
+                "--model-id",
+                "test-model",
+                "--allow-small-samples",
+            ]
+        )
+        assert rc == 0
+        assert out.is_file()
+        with self._safe_open(out) as handle:
+            keys = list(handle.keys())
+            assert "refusal_direction" in keys
+            assert "domain_direction" not in keys
+            metadata = handle.metadata()
+        assert metadata["model_id"] == "test-model"
+        assert metadata["has_domain_direction"] == "false"
+        assert metadata["layer_index"] == "1"
+        assert metadata["hidden_size"] == "8"
+
+    def test_both_writes_artifact_and_sidecar(self, tmp_path) -> None:
+        harmful, harmless = _pairs(tmp_path)
+        out = tmp_path / "direction.safetensors"
+        rc = main(
+            [
+                "--harmful-activations",
+                str(harmful),
+                "--harmless-activations",
+                str(harmless),
+                "--output-format",
+                "both",
+                "--output-file",
+                str(out),
+                "--model-id",
+                "test-model",
+                "--domain-label",
+                "creative_fiction",
+                "--allow-small-samples",
+            ]
+        )
+        assert rc == 0
+        assert out.is_file()
+        sidecar = tmp_path / "direction.safetensors.json"
+        assert sidecar.is_file()
+        payload = json.loads(sidecar.read_text())
+        assert payload["model_id"] == "test-model"
+        assert "timestamp" in payload
+        assert "refusal_direction" in payload
+        assert "domain_direction" not in payload
+        with self._safe_open(out) as handle:
+            metadata = handle.metadata()
+        assert metadata["domain_label"] == "creative_fiction"
+
+    def test_safetensors_without_output_file_exits_one(self, tmp_path, capsys) -> None:
+        harmful, harmless = _pairs(tmp_path)
+        before = set(tmp_path.iterdir())
+        rc = main(
+            [
+                "--harmful-activations",
+                str(harmful),
+                "--harmless-activations",
+                str(harmless),
+                "--output-format",
+                "safetensors",
+                "--allow-small-samples",
+            ]
+        )
+        assert rc == 1
+        assert set(tmp_path.iterdir()) == before
+        err = capsys.readouterr().err
+        assert "requires --output-file" in err
+
+
+class TestTextJsonUnchanged:
+    def _report(self, tmp_path):
+        harmful, harmless = _pairs(tmp_path)
+        from model_headroom.models.types import RefusalDirectionSpec
+        from model_headroom.refusal.activations import load_residual_batches_from_json
+        from model_headroom.refusal.extract import compute_refusal_direction
+
+        h = load_residual_batches_from_json(str(harmful))
+        s = load_residual_batches_from_json(str(harmless))
+        return compute_refusal_direction(
+            h,
+            s,
+            RefusalDirectionSpec(min_pairs=1),
+        )
+
+    def test_text_output_byte_identical(self, tmp_path, capsys) -> None:
+        report = self._report(tmp_path)
+        rc = main(
+            [
+                "--harmful-activations",
+                str(tmp_path / "h.json"),
+                "--harmless-activations",
+                str(tmp_path / "s.json"),
+                "--output-format",
+                "text",
+                "--allow-small-samples",
+            ]
+        )
+        assert rc == 0
+        assert capsys.readouterr().out == generate_refusal_report(report) + "\n"
+
+    def test_json_output_byte_identical(self, tmp_path, capsys) -> None:
+        report = self._report(tmp_path)
+        rc = main(
+            [
+                "--harmful-activations",
+                str(tmp_path / "h.json"),
+                "--harmless-activations",
+                str(tmp_path / "s.json"),
+                "--output-format",
+                "json",
+                "--allow-small-samples",
+            ]
+        )
+        assert rc == 0
+        assert capsys.readouterr().out == generate_refusal_json(report) + "\n"
+
+
+class TestDomainContrast:
+    def _safe_open(self, path):
+        try:
+            from safetensors import safe_open
+        except ImportError:
+            pytest.skip("safetensors not installed")
+        return safe_open(str(path), framework="pt")
+
+    def test_half_domain_pair_exits_one(self, tmp_path) -> None:
+        harmful, harmless = _pairs(tmp_path)
+        rc = main(
+            [
+                "--harmful-activations",
+                str(harmful),
+                "--harmless-activations",
+                str(harmless),
+                "--domain-activations",
+                str(harmful),
+                "--output-format",
+                "json",
+                "--allow-small-samples",
+            ]
+        )
+        assert rc == 1
+
+    def test_half_domain_prompt_pair_exits_one(self, tmp_path) -> None:
+        harmful, harmless = _pairs(tmp_path)
+        prompts = tmp_path / "p.txt"
+        prompts.write_text("a prompt\n")
+        rc = main(
+            [
+                "--harmful-activations",
+                str(harmful),
+                "--harmless-activations",
+                str(harmless),
+                "--domain-prompts",
+                str(prompts),
+                "--output-format",
+                "json",
+                "--allow-small-samples",
+            ]
+        )
+        assert rc == 1
+
+    def test_domain_direction_same_layer_and_length(self, tmp_path) -> None:
+        harmful, harmless = _pairs(tmp_path)
+        domain_in = tmp_path / "domain_in.json"
+        domain_out = tmp_path / "domain_out.json"
+        _write_activations(domain_in, 3, 2.0)
+        _write_activations(domain_out, 3, 0.0)
+        out = tmp_path / "direction.safetensors"
+        rc = main(
+            [
+                "--harmful-activations",
+                str(harmful),
+                "--harmless-activations",
+                str(harmless),
+                "--domain-activations",
+                str(domain_in),
+                "--out-of-domain-activations",
+                str(domain_out),
+                "--output-format",
+                "safetensors",
+                "--output-file",
+                str(out),
+                "--allow-small-samples",
+            ]
+        )
+        assert rc == 0
+        with self._safe_open(out) as handle:
+            refusal = handle.get_tensor("refusal_direction")
+            domain = handle.get_tensor("domain_direction")
+            metadata = handle.metadata()
+        assert domain.shape[0] == refusal.shape[0]
+        assert metadata["has_domain_direction"] == "true"
+        assert metadata["layer_index"] == "1"
+
+
+class TestRefusalCliErrorInterpolation:
+    def test_layer_index_out_of_range_interpolates_error_message(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        harmful, harmless = _pairs(tmp_path)
+        rc = main(
+            [
+                "--harmful-activations",
+                str(harmful),
+                "--harmless-activations",
+                str(harmless),
+                "--layer-index",
+                "999",
+                "--output-format",
+                "text",
+            ]
+        )
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert "{report.error_message}" not in err
+        assert "layer" in err.lower() or "999" in err

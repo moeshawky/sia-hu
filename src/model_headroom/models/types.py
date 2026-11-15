@@ -90,7 +90,7 @@ class ExpertActivationData:
 class GradientWeightPair:
     """Frozen dataclass holding gradient, weight, layer_name, parent_shape, truncated, sampling_mode."""
 
-    gradient: torch.Tensor
+    gradient: torch.Tensor | None
     weight: torch.Tensor
     layer_name: str
     parent_shape: tuple[int, int] | None = None
@@ -219,9 +219,9 @@ class EffectiveRankResult:
 class GradWeightRatio:
     """Frozen dataclass holding ratio, is_high_pressure, z_score, layer_name, signal_status, error_message."""
 
-    ratio: float
-    is_high_pressure: bool
-    z_score: float
+    ratio: float | None
+    is_high_pressure: bool | None
+    z_score: float | None
     layer_name: str
     signal_status: Literal[
         "computed", "zero_weight", "no_gradient", "invalid_evidence", "error"
@@ -231,7 +231,7 @@ class GradWeightRatio:
 
 @dataclass(frozen=True)
 class DeadNeuronReport:
-    """Frozen dataclass holding total_neurons, dead_count, dead_fraction, dead_indices, signal_status, error_message, activation_rms, mean_abs_activation, variance, near_zero_occupancy, cross_token_variance, source_type."""
+    """Frozen dataclass holding total_neurons, dead_count, dead_fraction, dead_indices, signal_status, error_message, activation_rms, mean_abs_activation, variance, near_zero_occupancy, cross_token_variance, source_type, negative_mean_count, negative_mean_fraction, never_active_count, never_active_fraction."""
 
     total_neurons: int
     dead_count: int
@@ -244,6 +244,10 @@ class DeadNeuronReport:
     variance: float | None = None
     near_zero_occupancy: float | None = None
     cross_token_variance: float | None = None
+    negative_mean_count: int = 0
+    negative_mean_fraction: float = 0.0
+    never_active_count: int = 0
+    never_active_fraction: float = 0.0
     source_type: SourceType = "measured"
 
 
