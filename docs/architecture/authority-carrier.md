@@ -32,7 +32,7 @@ score.
 - `analysis/scoring.py` — weighted composite score → [0.0, 1.0]
 - `reporting/json_report.py` and `reporting/human_report.py` — output formats
 - `models/loader.py` and `models/gguf_loader.py` — weight extraction (device resolved via `device.py`: accelerator preferred, CPU fallback)
-- CLI entry `cli.py` — 20 flags, `--analysis-mode decision_grade` (exit 2 if <70% measured coverage)
+- CLI entry `cli.py` — 25 flags (5 new `--acquire*` flags in v0.6.0), `--analysis-mode decision_grade` (exit 2 if <70% measured coverage)
 
 **Signal ownership (authority side):**
 

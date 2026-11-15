@@ -76,7 +76,7 @@ model-headroom --model-name NAME --model-path PATH \
 
 Exit codes: `0` success, `1` error (bad input, unreadable file, analysis failure), `2` decision-grade not met.
 
-All 20 flags are declared in `src/model_headroom/cli.py:parse_args` — the list above is grouped, not truncated.
+All 25 flags are declared in `src/model_headroom/cli.py:parse_args` — the list above is grouped, not truncated.
 
 ## Signals
 

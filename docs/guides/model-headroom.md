@@ -5,15 +5,15 @@ understand signals, read output formats. Cross-references
 `architecture/authority-carrier.md` (authority role), `concepts/headroom-signals.md`
 (R-01 through R-09 reference), `concepts/provenance.md` (measured vs synthetic),
 `concepts/frozen-contracts.md` (frozen dataclasses, NFR-01), and
-`reference/cli-flags.md` (all 20 flags). No Python code changes are proposed here.
+`reference/cli-flags.md` (all 25 flags). No Python code changes are proposed here.
 
 ---
 
 ## What model-headroom is
 
 Model Headroom Analyzer — 7 core signals + 2 opt-in gradient diagnostics for
-training headroom on MoE and dense models. Python package, strict types, 21 frozen
-dataclasses, 95% test coverage.
+training headroom on MoE and dense models. Python package, strict types, 25 frozen
+dataclasses (27 including acquire/provenance.py), 95% test coverage.
 
 **Version:** 0.3.0 — the authority half of sia-hu. Scores; never proxies.
 
@@ -93,7 +93,7 @@ model-headroom --model-name NAME --model-path PATH \
 **Exit codes:** 0 success, 1 error (bad input, unreadable file, analysis failure),
 2 decision-grade not met.
 
-All 20 flags are declared in `src/model_headroom/cli.py:parse_args`.
+All 25 flags are declared in `src/model_headroom/cli.py:parse_args`.
 
 ---
 

@@ -525,8 +525,11 @@ def main(argv: list[str] | None = None) -> int:
     device = resolve_device(args.device)
     if device is None:
         print(
-            f"Error: --device {args.device} requested but no {args.device} "
-            "device is available",
+            f"error: --device {args.device} requested but no {args.device} "
+            "device is available\n"
+            f"  Cause:  no {args.device} device found on this system\n"
+            "  Action: Pass --device auto or --device cpu\n"
+            "  Exit:   1",
             file=sys.stderr,
         )
         return 1
@@ -536,7 +539,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.model_id is not None:
         if args.model_name is not None or args.model_path is not None:
             print(
-                "Error: --model-id cannot be combined with --model-name/--model-path",
+                "error: --model-id cannot be combined with --model-name/--model-path\n"
+                "  Cause:  --model-id was combined with --model-name or --model-path\n"
+                "  Action: Use only one of --model-id or --model-name/--model-path\n"
+                "  Exit:   1",
                 file=sys.stderr,
             )
             return 1

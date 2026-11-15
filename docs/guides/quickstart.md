@@ -276,5 +276,5 @@ File:line references cited throughout are from:
 
 ---
 
-See also: `docs/model-headroom/README.md` (full CLI flag reference, 20 flags,
+See also: `docs/model-headroom/README.md` (full CLI flag reference, 25 flags,
 `cli.py:parse_args`).

@@ -51,7 +51,7 @@ src/
     names.py       → Shared name contract (stdlib only, R-01 safe)
     sync.py        → Native off-box capture sync (rclone subprocess, lazy import)
   model_headroom/            → scoring authority package
-    cli.py           → CLI entry point (20 flags)
+    cli.py           → CLI entry point (25 flags, 5 new `--acquire*` in v0.6.0)
     __main__.py      → Enables python -m model_headroom
     analysis/
       orchestrator.py  → Runs signals with timing, assembles HeadroomReport
