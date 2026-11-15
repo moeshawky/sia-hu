@@ -83,8 +83,12 @@ parent, 99.97%. Do not present the percentage as parent-level fidelity.
 **Data source:** `--weight-pairs-file` (a JSON file of weight/gradient pairs
 carrying `gradient`, `weight`, and `layer_name` — `load_weight_pairs_from_json`,
 `models/loader.py:353-357`; `models/types.py:79-87`) AND, since the GGUF path
-landed, `--model-path` with a `.gguf` file producing `weight_samples` (weights
-only — never presented as gradient data).
+landed, `--model-path` producing `weight_samples` (weights only — never
+presented as gradient data). The sampler covers both a `.gguf` file
+(`models/ternary_sampling.py`) and a safetensors checkpoint directory
+(`models/safetensors_sampling.py`); both seed the row selection, keep the full
+column dimension, cap the row count, and report the FULL parent shape so
+coverage is computed against the parent matrix rather than the sample.
 
 **Sidecar key:** `effective_rank` — the only signal key emitted by the MVP sidecar.
 Weight tensors come from the checkpoint via safetensors.
@@ -106,8 +110,9 @@ report); `scoring.py` treats `data` as iterable for this signal.
 
 **Data source:** `--weight-pairs-file weights.json` with gradient arrays.
 
-**Sidecar key:** `grad_weight_ratio` — weight-only pairs carry a real zero-gradient
-array, so this scores 0.0 by design without a training hook.
+**Sidecar key:** `grad_weight_ratio` — weight-only pairs carry `gradient: null`, so
+this reports `signal_status: "no_gradient"` with a null ratio rather than scoring
+absent evidence.
 
 ---
 
@@ -115,9 +120,12 @@ array, so this scores 0.0 by design without a training hook.
 
 **Scope:** Universal (requires activation data).
 
-**What it measures:** Near-zero activation channel detection — fraction of neurons
-whose activations stay below threshold (1e-6). Threshold application and index
-extraction. Floating-point false positives possible at the float16/float32 boundary.
+**What it measures:** Activity-based dead/inactive channel detection — fraction of
+neurons whose maximum absolute activation across all batch and token positions is
+exactly 0 (never fires). Signed mean activation is NOT used as the dead criterion,
+so negative-but-active channels are never misclassified as dead. Reports three
+separate statistics: dead/inactive channels, negative-mean channels, and
+never-active channels. Threshold application and index extraction.
 
 **Data source:** `--mlp-activations-file activations.json` or `--activations
 expert_activations.json` (ExpertActivationData: `layers: dict[str, dict[str, int]]`

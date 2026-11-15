@@ -29,6 +29,12 @@ _SUBCOMMANDS = (
         "main",
         "Run the model-headroom-refusal CLI.",
     ),
+    (
+        "model-headroom-paired",
+        "model_headroom.paired.cli",
+        "main",
+        "Run the paired-model recovery diagnostics CLI.",
+    ),
     ("doctor", "sia.doctor", "main", "Read-only workspace preflight."),
     (
         "publish",
@@ -47,9 +53,9 @@ def _top_parser() -> argparse.ArgumentParser:
         prog="sia",
         add_help=False,
         description=(
-            "sia — unified CLI aliasing capture-proxy, model-headroom, and "
-            "model-headroom-refusal. All arguments after the subcommand are "
-            "forwarded unchanged to that CLI."
+            "sia — unified CLI aliasing capture-proxy, model-headroom, "
+            "model-headroom-refusal, and model-headroom-paired. All arguments "
+            "after the subcommand are forwarded unchanged to that CLI."
         ),
     )
     parser.add_argument(
@@ -76,7 +82,7 @@ def main(args: list[str] | None = None) -> int:
     parser = _top_parser()
 
     # No subcommand, or explicit help: render the top-level help (which lists
-    # all five subcommands) and exit successfully. ``--help``/-h is handled
+    # all six subcommands) and exit successfully. ``--help``/-h is handled
     # here so it is never swallowed by the top parser and can instead be
     # forwarded to a sub-main (e.g. ``sia capture-proxy --help``).
     if not args:

@@ -13,12 +13,19 @@ imports the orchestrator.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    import torch
 
 from model_headroom.device import resolve_device
 from model_headroom.models.types import (
     LayerSelection,
+    RefusalDirectionReport,
     RefusalDirectionSpec,
     ResidualBatch,
 )
@@ -29,6 +36,7 @@ from model_headroom.refusal.activations import (
     load_prompts,
     load_residual_batches_from_json,
 )
+from model_headroom.refusal.artifact import write_refusal_artifact
 from model_headroom.refusal.extract import compute_refusal_direction
 from model_headroom.refusal.recover import (
     load_weight_deltas_from_json,
@@ -175,13 +183,37 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-format",
-        choices=["text", "json"],
+        choices=["text", "json", "safetensors", "both"],
         default="text",
         help="Output format (default: text)",
     )
     parser.add_argument(
         "--output-file",
         help="Write the report to a file instead of stdout",
+    )
+    parser.add_argument(
+        "--domain-activations",
+        help="JSON of pre-captured in-domain residual activations, same format as --harmful-activations",
+    )
+    parser.add_argument(
+        "--out-of-domain-activations",
+        help="JSON of pre-captured out-of-domain residual activations, same format as --harmful-activations",
+    )
+    parser.add_argument(
+        "--domain-prompts",
+        help="Prompt file set for the in-domain contrast set (.txt, .json, or .jsonl)",
+    )
+    parser.add_argument(
+        "--out-of-domain-prompts",
+        help="Prompt file set for the out-of-domain contrast set (.txt, .json, or .jsonl)",
+    )
+    parser.add_argument(
+        "--domain-label",
+        help="Optional label recorded in the artifact metadata, e.g. creative_fiction",
+    )
+    parser.add_argument(
+        "--model-id",
+        help="Optional explicit model id recorded in the artifact metadata",
     )
     return parser.parse_args(argv)
 
@@ -376,7 +408,6 @@ def _load_live(
 
 def torch_dtype(model_path: str) -> str:
     """Resolve the checkpoint dtype string for from_pretrained."""
-    import json
 
     try:
         with (Path(model_path) / "config.json").open() as handle:
@@ -397,6 +428,274 @@ def _resolve_device(requested: str) -> str | None:
     return resolve_device(requested)
 
 
+def _domain_requested(args: argparse.Namespace) -> bool:
+    return bool(
+        args.domain_activations
+        or args.out_of_domain_activations
+        or args.domain_prompts
+        or args.out_of_domain_prompts
+    )
+
+
+def _resolve_model_id(args: argparse.Namespace) -> str | None:
+    if args.model_id is not None:
+        return cast("str | None", args.model_id)
+    if args.model_path is not None:
+        return cast("str | None", args.model_path)
+    if args.sglang_model is not None:
+        return cast("str | None", args.sglang_model)
+    return None
+
+
+def _build_sidecar(
+    report: RefusalDirectionReport,
+    domain_direction: torch.Tensor | None,
+    model_id: str | None,
+) -> str:
+    payload = json.loads(generate_refusal_json(report))
+    if domain_direction is not None:
+        payload["domain_direction"] = [float(v) for v in domain_direction.tolist()]
+    payload["model_id"] = model_id if model_id is not None else ""
+    payload["timestamp"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return json.dumps(payload, indent=2)
+
+
+def _load_domain_offline(
+    args: argparse.Namespace,
+) -> tuple[list[ResidualBatch], list[ResidualBatch]] | None:
+    in_domain = load_residual_batches_from_json(args.domain_activations)
+    out_of_domain = load_residual_batches_from_json(args.out_of_domain_activations)
+    if in_domain is None:
+        print(
+            "error: loading domain activations\n"
+            f"  Cause:  failed to load in-domain activations from {args.domain_activations}\n"
+            "  Action: Check the JSON file\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return None
+    if out_of_domain is None:
+        print(
+            "error: loading domain activations\n"
+            f"  Cause:  failed to load out-of-domain activations from {args.out_of_domain_activations}\n"
+            "  Action: Check the JSON file\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return None
+    return (in_domain, out_of_domain)
+
+
+def _capture_domain_sglang(
+    args: argparse.Namespace, layer_name: str
+) -> tuple[list[ResidualBatch], list[ResidualBatch]] | None:
+    served = args.sglang_model or "default"
+    in_prompts = load_prompts(args.domain_prompts) if args.domain_prompts else None
+    out_prompts = (
+        load_prompts(args.out_of_domain_prompts) if args.out_of_domain_prompts else None
+    )
+    if in_prompts is None or out_prompts is None:
+        print(
+            "error: loading domain prompt sets\n"
+            "  Cause:  failed to load domain or out-of-domain prompts\n"
+            "  Action: Check the prompt files\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return None
+    in_batches = capture_residuals_sglang(
+        args.sglang_url, served, in_prompts, layer_name
+    )
+    out_batches = capture_residuals_sglang(
+        args.sglang_url, served, out_prompts, layer_name
+    )
+    if in_batches is None or out_batches is None:
+        print(
+            "error: sglang returned no hidden states\n"
+            "  Cause:  sglang server did not return hidden states for the domain contrast\n"
+            "  Action: Run sglang server with --enable-return-hidden-states\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return None
+    return (list(in_batches.values()), list(out_batches.values()))
+
+
+def _load_live_model(args: argparse.Namespace) -> tuple[Any, Any] | None:
+    import transformers
+    from transformers import AutoTokenizer
+
+    path = Path(args.model_path)
+    if path.is_file():
+        raise _ModelPathError(
+            "--model-path expects a HuggingFace model directory, got a file: "
+            f"{path}. transformers cannot load GGUF checkpoints for live capture; "
+            "use --harmful-activations/--harmless-activations with pre-captured "
+            "residuals, or --sglang-url with --enable-return-hidden-states."
+        )
+    if path.is_dir() and not (path / "config.json").is_file():
+        raise _ModelPathError(
+            f"--model-path has no config.json; not a HuggingFace checkpoint directory: {path}"
+        )
+    if not path.exists() and _is_filesystem_shaped(args.model_path):
+        raise _ModelPathError(f"--model-path does not exist: {path}")
+    tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+    dtype = torch_dtype(args.model_path)
+    loader_kwargs: dict[str, object] = {"dtype": dtype}
+    if str(args.device).startswith("cuda"):
+        try:
+            import accelerate  # noqa: F401
+
+            loader_kwargs["device_map"] = "auto"
+        except ImportError:
+            pass
+    model = None
+    for loader_name in ("AutoModelForCausalLM", "AutoModelForImageTextToText"):
+        try:
+            loader = getattr(transformers, loader_name)
+            model = loader.from_pretrained(args.model_path, **loader_kwargs)
+            break
+        except (OSError, ValueError, TypeError, AttributeError):
+            model = None
+    if model is None:
+        return None, None
+    return model, tokenizer
+
+
+def _capture_domain_live(
+    args: argparse.Namespace, layer_name: str
+) -> tuple[list[ResidualBatch], list[ResidualBatch]] | None:
+    try:
+        loaded = _load_live_model(args)
+    except _ModelPathError as exc:
+        print(
+            "error: model path error\n"
+            f"  Cause:  {exc}\n"
+            "  Action: Check the model path\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return None
+    if loaded is None:
+        print(
+            "error: loading model\n"
+            "  Cause:  failed to load model for domain capture\n"
+            "  Action: Check the model path\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return None
+    model, tokenizer = loaded
+    modules = dict(model.named_modules())
+    if layer_name not in modules:
+        print(
+            "error: domain layer not found\n"
+            f"  Cause:  layer {layer_name!r} is not present in the model\n"
+            "  Action: Check the layer selection\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return None
+    in_prompts = load_prompts(args.domain_prompts) if args.domain_prompts else None
+    out_prompts = (
+        load_prompts(args.out_of_domain_prompts) if args.out_of_domain_prompts else None
+    )
+    if in_prompts is None or out_prompts is None:
+        print(
+            "error: loading domain prompt sets\n"
+            "  Cause:  failed to load domain or out-of-domain prompts\n"
+            "  Action: Check the prompt files\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return None
+    in_batches = capture_last_token_residuals(
+        model,
+        tokenizer,
+        in_prompts,
+        [layer_name],
+        device=args.device,
+        batch_size=args.batch_size,
+        max_length=args.max_length,
+        position=args.position,
+    )
+    out_batches = capture_last_token_residuals(
+        model,
+        tokenizer,
+        out_prompts,
+        [layer_name],
+        device=args.device,
+        batch_size=args.batch_size,
+        max_length=args.max_length,
+        position=args.position,
+    )
+    if in_batches is None or out_batches is None:
+        print(
+            "error: live capture produced no activations\n"
+            "  Cause:  capture returned None for domain or out-of-domain residuals\n"
+            "  Action: Check model, tokenizer, and prompts\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return None
+    return (list(in_batches.values()), list(out_batches.values()))
+
+
+def _compute_domain_direction(
+    args: argparse.Namespace, report: RefusalDirectionReport
+) -> torch.Tensor | None:
+    if report.layer_index is None:
+        print(
+            "error: domain contrast requires a resolved layer\n"
+            "  Cause:  the refusal direction has no resolved layer_index\n"
+            "  Action: Provide --layer-name or --layer-index\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return None
+    layer_name = report.layer_stats[report.layer_index].layer_name
+    if args.domain_activations and args.out_of_domain_activations:
+        loaded = _load_domain_offline(args)
+    elif args.domain_prompts and args.out_of_domain_prompts:
+        if args.sglang_url:
+            loaded = _capture_domain_sglang(args, layer_name)
+        else:
+            loaded = _capture_domain_live(args, layer_name)
+    else:
+        print(
+            "error: incomplete domain contrast\n"
+            "  Cause:  provide both --domain-activations and --out-of-domain-activations, or both --domain-prompts and --out-of-domain-prompts\n"
+            "  Action: Complete the domain pair\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return None
+    if loaded is None:
+        return None
+    in_domain, out_of_domain = loaded
+    domain_spec = RefusalDirectionSpec(
+        layer_selection="explicit",
+        layer_name=None,
+        layer_index=report.layer_index,
+        depth_fraction=args.depth_fraction,
+        orthogonalize=args.orthogonalize,
+        massive_activation_sigma=args.mask_sigma,
+        winsorize_quantile=args.winsorize,
+        min_pairs=1 if args.allow_small_samples else args.min_pairs,
+    )
+    domain_report = compute_refusal_direction(in_domain, out_of_domain, domain_spec)
+    if domain_report.direction is None:
+        print(
+            "error: domain contrast computation\n"
+            f"  Cause:  {domain_report.error_message}\n"
+            "  Action: Check the domain prompt sets and layer selection\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return None
+    return domain_report.direction
+
+
 def main(argv: list[str] | None = None) -> int:
     """Drive refusal-direction extraction and emit a report."""
     args = parse_args(argv)
@@ -405,6 +704,16 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     args.device = device
     spec = _build_spec(args)
+
+    if args.weight_deltas and _domain_requested(args):
+        print(
+            "error: weight-deltas cannot carry a domain contrast\n"
+            "  Cause:  --weight-deltas was combined with a domain contrast flag\n"
+            "  Action: Use --weight-deltas alone, or use activations/prompts for the domain contrast\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return 1
 
     if args.sglang_url:
         if not (args.harmful_prompts and args.harmless_prompts):
@@ -491,7 +800,7 @@ def main(argv: list[str] | None = None) -> int:
     if report.direction_status == "error":
         print(
             "error: refusal computation\n"
-            "  Cause:  {report.error_message}\n"
+            f"  Cause:  {report.error_message}\n"
             "  Action: Check model and inputs\n"
             "  Exit:   1",
             file=sys.stderr,
@@ -500,23 +809,66 @@ def main(argv: list[str] | None = None) -> int:
     if report.direction is None:
         print(
             "error: refusal computation\n"
-            "  Cause:  {report.error_message}\n"
+            f"  Cause:  {report.error_message}\n"
             "  Action: Check model and inputs\n"
             "  Exit:   2",
             file=sys.stderr,
         )
         return 2
 
-    output = (
-        generate_refusal_json(report)
-        if args.output_format == "json"
-        else generate_refusal_report(report)
+    if args.output_format in ("safetensors", "both") and not args.output_file:
+        print(
+            "error: --output-format safetensors|both requires --output-file\n"
+            "  Cause:  --output-file was not provided\n"
+            "  Action: Provide --output-file with --output-format safetensors or both\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return 1
+
+    domain_direction = None
+    if _domain_requested(args):
+        domain_direction = _compute_domain_direction(args, report)
+        if domain_direction is None:
+            return 1
+
+    model_id = _resolve_model_id(args)
+
+    if args.output_format == "text":
+        output = generate_refusal_report(report)
+        if args.output_file:
+            Path(args.output_file).write_text(output)
+            print(f"Report written to {args.output_file}", file=sys.stderr)
+        else:
+            print(output)
+        return 0
+    if args.output_format == "json":
+        output = generate_refusal_json(report)
+        if args.output_file:
+            Path(args.output_file).write_text(output)
+            print(f"Report written to {args.output_file}", file=sys.stderr)
+        else:
+            print(output)
+        return 0
+    if args.output_format == "safetensors":
+        write_refusal_artifact(
+            report,
+            args.output_file,
+            model_id=model_id,
+            domain_direction=domain_direction,
+            domain_label=args.domain_label,
+        )
+        return 0
+    # both
+    write_refusal_artifact(
+        report,
+        args.output_file,
+        model_id=model_id,
+        domain_direction=domain_direction,
+        domain_label=args.domain_label,
     )
-    if args.output_file:
-        Path(args.output_file).write_text(output)
-        print(f"Report written to {args.output_file}", file=sys.stderr)
-    else:
-        print(output)
+    sidecar = _build_sidecar(report, domain_direction, model_id)
+    Path(f"{args.output_file}.json").write_text(sidecar)
     return 0
 
 

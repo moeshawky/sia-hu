@@ -149,4 +149,5 @@ def analyze_gradient_effective_ranks_for_pairs(
     return [
         (p.layer_name, compute_gradient_effective_rank(p.gradient, device=device))
         for p in pairs
+        if p.gradient is not None
     ]

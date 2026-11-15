@@ -6,6 +6,7 @@ import argparse
 import contextlib
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -257,6 +258,122 @@ def _gguf_weight_samples(
     return samples
 
 
+_SAFETENSORS_TENSOR_TEMPLATES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "model.language_model.layers.{layer}.mlp.{proj}_proj.weight",
+        ("gate", "up", "down"),
+    ),
+    (
+        "model.layers.{layer}.mlp.{proj}_proj.weight",
+        ("gate", "up", "down"),
+    ),
+    (
+        "model.layers.{layer}.mlp.experts.0.{proj}_proj.weight",
+        ("gate", "up", "down"),
+    ),
+    (
+        "model.layers.{layer}.block_sparse_moe.experts.0.{proj}.weight",
+        ("w1", "w2", "w3"),
+    ),
+)
+
+_LAYER_INDEX_PATTERN = re.compile(r"layers\.(\d+)")
+
+
+def _safetensors_weight_samples(
+    model_path: str, sampling_mode: str, max_rows: int | None, device: str
+) -> list[WeightSample] | None:
+    """Sample weight matrices from a safetensors checkpoint for R-03 effective rank.
+
+    Sibling of :func:`_gguf_weight_samples`: the GGUF sampler reads quantized
+    blocks, this one reads safetensors shards. Both seed the row selection, keep
+    the full column dimension, cap the row count, and report the FULL parent shape
+    so coverage is computed against the parent matrix rather than the sample.
+
+    Input:
+        model_path: Path to a checkpoint directory, or to a parent of one.
+        sampling_mode: Sampling mode recorded on each returned sample.
+        max_rows: Upper bound on sampled rows per tensor (256 when unset).
+        device: Device the sampled rows are returned on.
+    Output (found): One WeightSample per sampled tensor.
+    Output (not found): None, with a warning on stderr naming the reason.
+    """
+    path = Path(model_path)
+    if not path.is_dir():
+        return None
+    try:
+        from model_headroom.models.safetensors_sampling import (
+            safetensors_weight_map,
+            sample_safetensors_weight_for_effective_rank,
+        )
+    except ImportError:
+        print(
+            f"warning: cannot sample safetensors weights from {model_path}: "
+            "install the [headroom] extra",
+            file=sys.stderr,
+        )
+        return None
+
+    weight_map = safetensors_weight_map(path)
+    if not weight_map:
+        return None
+
+    layer_indices = sorted(
+        {
+            int(match)
+            for name in weight_map
+            for match in _LAYER_INDEX_PATTERN.findall(name)
+        }
+    )
+    if not layer_indices:
+        print(
+            f"warning: no safetensors weight samples for {model_path}: "
+            "no layer-indexed tensors found",
+            file=sys.stderr,
+        )
+        return None
+
+    layers = sorted(
+        {layer_indices[0], layer_indices[len(layer_indices) // 2], layer_indices[-1]}
+    )
+    rows = max_rows if isinstance(max_rows, int) and max_rows > 0 else 256
+
+    for template, projections in _SAFETENSORS_TENSOR_TEMPLATES:
+        for proj in projections:
+            names: list[str] = []
+            for layer in layers:
+                candidate = template.format(layer=layer, proj=proj)
+                if candidate in weight_map:
+                    names.append(candidate)
+            if not names:
+                continue
+            selected = sample_safetensors_weight_for_effective_rank(
+                path, names, max_rows=rows, device=device
+            )
+            if not selected:
+                continue
+            return [
+                WeightSample(
+                    weight=tensor,
+                    layer_name=layer_name,
+                    parent_shape=parent_shape,
+                    truncated=(tensor.shape[0] < parent_shape[0]),
+                    sampling_mode=cast(
+                        "SamplingMode",
+                        "single_tile" if sampling_mode == "unknown" else sampling_mode,
+                    ),
+                )
+                for layer_name, tensor, parent_shape in selected
+            ]
+
+    print(
+        f"warning: no safetensors weight samples for {model_path}: "
+        "no MLP projection tensor matched a known layout",
+        file=sys.stderr,
+    )
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     # Maps the model type flag to None when auto-detection is selected; otherwise forwards the explicit model type to run_analysis.
     """Drives the Model Headroom analysis pipeline: loads model data from provided paths, runs the analysis signals, checks decision-grade requirements if applicable, and generates terminal or JSON reports. Returns exit code (0 success, 1 error, 2 decision-grade not met)."""
@@ -444,6 +561,10 @@ def main(argv: list[str] | None = None) -> int:
         weight_samples = _gguf_weight_samples(
             args.model_path, args.sampling_mode, args.rank_sample_count, device
         )
+        if weight_samples is None:
+            weight_samples = _safetensors_weight_samples(
+                args.model_path, args.sampling_mode, args.rank_sample_count, device
+            )
 
     if args.mlp_activations_file:
         from model_headroom.models.loader import load_mlp_activations_diagnostic

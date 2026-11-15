@@ -442,7 +442,6 @@ def run_analysis(
                 f"dead_neurons_{act.layer_name}",
                 analyze_dead_neurons,
                 act,
-                threshold=1e-6,
                 return_indices=False,
                 source_type=mlp_src,
                 device=resolved_device,

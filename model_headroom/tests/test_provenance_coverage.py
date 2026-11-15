@@ -67,6 +67,11 @@ def test_dead_neurons_richer_stats() -> None:
     acts2 = MLPActivations(activations=torch.zeros(2, 4, 16), layer_name="l1")
     rep2 = analyze_dead_neurons(acts2, source_type="synthetic")
     assert rep2.dead_fraction == 1.0
+    assert rep2.dead_count == 16
+    assert rep2.never_active_count == 16
+    assert rep2.never_active_fraction == 1.0
+    assert rep2.negative_mean_count == 0
+    assert rep2.negative_mean_fraction == 0.0
     assert rep2.source_type == "synthetic"
 
 

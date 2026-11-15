@@ -15,7 +15,7 @@ Model Headroom Analyzer — 7 core signals + 2 opt-in gradient diagnostics for
 training headroom on MoE and dense models. Python package, strict types, 21 frozen
 dataclasses, 95% test coverage.
 
-**Version:** 0.3.0 — the authority half of sia-hu. Scores; never proxies.
+**Version:** 0.5.0 — the authority half of sia-hu. Scores; never proxies.
 
 ---
 
@@ -145,6 +145,22 @@ bounds. Decision-grade requires ≥70% measured coverage.
 file. Format is auto-detected from the path. GGUF configs are read via
 `models/gguf_loader.py` (requires the `gguf` extra). Weights resolve through
 `src/model_headroom/device.py` — accelerator preferred, CPU as fallback (NFR-01).
+
+### Weight sampling for R-03
+
+When `--model-path` points at a checkpoint and no `--weight-pairs-file` is given,
+the CLI samples weight matrices so R-03 is not skipped. A `.gguf` file is read
+through `models/ternary_sampling.py`; a safetensors checkpoint directory is read
+through `models/safetensors_sampling.py`. Both seed the row selection, keep the
+full column dimension, cap the row count (256 by default), and report the FULL
+parent shape, so coverage is computed against the parent matrix rather than the
+sample.
+
+The samples are weights only — no gradient is manufactured, so R-04
+(`grad_weight_ratio`) stays skipped and the report says so. Declare the
+provenance of the checkpoint with `--weight-pairs-source-type`; without it the
+sample is reported as `fixture` / `unverified` and contributes no measured
+coverage.
 
 ---
 

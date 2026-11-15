@@ -1,4 +1,13 @@
-"""Dead neuron analysis signal. Computes per-neuron mean activations to identify dead neurons, reports activation statistics including RMS, mean absolute, variance, near-zero occupancy, and cross-token variance."""
+"""Dead neuron analysis signal. Computes per-neuron activation statistics to identify dead neurons, reports activation statistics including RMS, mean absolute, variance, near-zero occupancy, and cross-token variance. Distinguishes genuinely inactive channels from channels with negative mean activations.
+
+`dead_count`/`dead_fraction` and `never_active_count`/`never_active_fraction`
+are aliases: under the activity-based dead criterion (maximum absolute
+activation across all batch and token positions is exactly 0), a neuron that
+never fired is by definition dead, so the two statistics carry identical
+values for a single capture. They are reported separately so a consumer can
+read "dead" and "never-active" as distinct concepts without assuming
+independence — they are not independent statistics.
+"""
 
 from __future__ import annotations
 
@@ -8,14 +17,12 @@ from model_headroom.models.types import DeadNeuronReport, MLPActivations, Source
 
 
 def analyze_dead_neurons(
-    # Guard against division by zero (line 21); cast to float for statistical computations (line 27); near-zero occupancy measures fraction of activations below 1e-5 (line 31); cross-token variance measures how neuron mean activity varies across tokens (line 32-34)
     activations: MLPActivations,
-    threshold: float = 1e-6,
     return_indices: bool = False,
     source_type: SourceType = "measured",
     device: str = "cpu",
 ) -> DeadNeuronReport:
-    """Analyze dead neurons from MLP activations. Computes per-neuron mean activations, identifies neurons below threshold, and reports activation statistics."""
+    """Analyze dead neurons from MLP activations. Reports dead/inactive, negative-mean, and never-active channel counts with activation statistics."""
     try:
         tensor = activations.activations.to(device)
         neuron_means = tensor.mean(dim=(0, 1))
@@ -32,9 +39,19 @@ def analyze_dead_neurons(
                 source_type=source_type,
             )
 
-        dead_mask = neuron_means < threshold
+        max_abs_per_neuron = torch.amax(tensor.abs(), dim=(0, 1))
+        dead_mask = max_abs_per_neuron == 0
         dead_count = int(dead_mask.sum().item())
         dead_fraction = dead_count / total_neurons if total_neurons > 0 else 0.0
+
+        negative_mean_mask = neuron_means < 0
+        negative_mean_count = int(negative_mean_mask.sum().item())
+        negative_mean_fraction = (
+            negative_mean_count / total_neurons if total_neurons > 0 else 0.0
+        )
+
+        never_active_count = dead_count
+        never_active_fraction = dead_fraction
 
         dead_indices: list[int] | None = None
         if return_indices:
@@ -60,6 +77,10 @@ def analyze_dead_neurons(
             variance=variance,
             near_zero_occupancy=near_zero,
             cross_token_variance=cross_token_variance,
+            negative_mean_count=negative_mean_count,
+            negative_mean_fraction=negative_mean_fraction,
+            never_active_count=never_active_count,
+            never_active_fraction=never_active_fraction,
             source_type=source_type,
         )
     except Exception as e:

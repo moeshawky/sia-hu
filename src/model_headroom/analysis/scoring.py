@@ -62,10 +62,11 @@ def _score_signal(signal: SignalResult) -> float | None:
 
     if signal.signal_name == "grad_weight_ratio":
         ratios = cast("list[GradWeightRatio]", data)
-        if not ratios or len(ratios) == 0:
+        measured = [r for r in ratios if r.is_high_pressure is not None]
+        if not measured:
             return None
-        high_pressure_count = sum(1 for r in ratios if r.is_high_pressure)
-        total = len(ratios)
+        high_pressure_count = sum(1 for r in measured if r.is_high_pressure)
+        total = len(measured)
         return 1.0 - (high_pressure_count / total)
 
     if signal.signal_name == "dead_neurons":

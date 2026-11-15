@@ -86,13 +86,18 @@ def _format_signal_status(signal: Any) -> str:
     if signal.signal_name == "grad_weight_ratio":
         if not data:
             return f"  {name:<30} [NO DATA]{prov}"
-        high = sum(1 for r in data if r.is_high_pressure)
-        return f"  {name:<30} {high}/{len(data)} layers high pressure{prov}"
+        measured = [r for r in data if r.is_high_pressure is not None]
+        high = sum(1 for r in measured if r.is_high_pressure)
+        return f"  {name:<30} {high}/{len(measured)} layers high pressure ({len(measured)}/{len(data)} measured){prov}"
 
     if signal.signal_name == "dead_neurons":
         src = getattr(data, "source_type", "measured")
         src_str = f" {src}" if src != "measured" else ""
-        return f"  {name:<30} {data.dead_fraction:.1%} dead ({data.dead_count}/{data.total_neurons}){src_str}{prov}"
+        return (
+            f"  {name:<30} {data.dead_fraction:.1%} dead ({data.dead_count}/{data.total_neurons}), "
+            f"neg {data.negative_mean_fraction:.0%} ({data.negative_mean_count}), "
+            f"never {data.never_active_fraction:.0%} ({data.never_active_count}){src_str}{prov}"
+        )
 
     if signal.signal_name == "load_balance":
         return f"  {name:<30} balance={data.balance_ratio:.2f} (ideal={data.ideal_entropy:.2f}){prov}"

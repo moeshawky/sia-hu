@@ -60,7 +60,9 @@ class TestGradWeightRatioEdge:
         result = analyze_grad_weight_ratios(pairs)
         assert len(result) == 1
         assert result[0].signal_status == "zero_weight"
-        assert result[0].ratio == 0.0
+        assert result[0].ratio is None
+        assert result[0].is_high_pressure is None
+        assert result[0].z_score is None
 
     def test_zero_gradient(self) -> None:
         pairs = [
@@ -73,7 +75,9 @@ class TestGradWeightRatioEdge:
         result = analyze_grad_weight_ratios(pairs)
         assert len(result) == 1
         assert result[0].signal_status == "no_gradient"
-        assert result[0].ratio == 0.0
+        assert result[0].ratio is None
+        assert result[0].is_high_pressure is None
+        assert result[0].z_score is None
 
     def test_unicode_layer_name(self) -> None:
         pairs = [

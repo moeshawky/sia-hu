@@ -26,45 +26,47 @@ carries uncommitted Phase 12 changes that shift them. Carrier-side items and the
 order live in `docs/maintenance/2026-11-07-seams/SEAMS.md`; they are cross-referenced here, not
 restated.
 
-### A-1 — `grad_weight_ratio` scores 1.0 from a zero gradient (BLOCKER)
+### A-1 — `grad_weight_ratio` scores 1.0 from a zero gradient (RESOLVED in code)
 
 The signal returns `list[GradWeightRatio]`, not a report object. `_run_signal`
-(`analysis/orchestrator.py:130`, the `hasattr(data, "signal_status")` guard) promotes a signal's own
-status only when `data` carries a `signal_status` attribute; a list does not, so the per-ratio
-`no_gradient` label (`signals/grad_weight_ratio.py:71-81`) is discarded and the signal is stamped
-`computed`. `_score_signal` (`analysis/scoring.py:67-73`) then computes
-`1.0 - high_pressure_count / total`. A zero gradient yields `ratio=0.0`, `is_high_pressure=False`,
-so the score is exactly `1.0`.
+(`analysis/orchestrator.py:133-146`) now properly handles list signal statuses:
+when every ratio in the list carries `signal_status != "computed"`, the whole
+signal is stamped with that status (e.g. `"no_gradient"`) instead of being
+laundered into `"computed"`. `_score_signal` (`analysis/scoring.py:63-70`)
+then returns `None` (neutral) when no ratios are measured, instead of
+computing `1.0 - high_pressure_count / total`.
 
-A zero gradient is the strongest possible evidence of *no training pressure*. The current rule
-converts it into the maximum headroom score — the sign of the evidence is inverted.
+A zero gradient is the strongest possible evidence of *no training pressure*.
+The corrected rule converts it into a neutral score — the sign of the evidence
+is no longer inverted.
 
-Measured consequence on the 2026-11-07 run:
+The roadmap's original measurement (2026-11-07 run, `overall_headroom_score`
+0.644211 with the bug) predates the fix. The fix was landed in commits
+`5e12ff0` (measurement-integrity reconstruction) and `fa0e37c` (Phase 0/1
+corrections). The line references in this section (`orchestrator.py:130`,
+`scoring.py:67-73`) predate the file restructure; current line numbers are
+`orchestrator.py:133-146` and `scoring.py:63-70`.
 
-| Quantity | Reported | Without the zero-gradient ratio |
-|---|---:|---:|
-| `overall_headroom_score` | 0.644211 | 0.550461 (ratio neutral 0.5) / 0.562106 (excluded) |
-| `headroom_score_measured` | 0.884563 | 0.769126 |
-| `measurement_coverage` | 0.375 | 0.1875 |
+No code change is required — the fix is already in `HEAD`. This section is
+retained as historical context only.
 
-Compounding cause: `analysis/orchestrator.py:225-228` defaults `eff_source` / `grad_source` to
-`measured` and `eff_verif` / `grad_verif` to `verified` when no provenance is supplied, and the
-`--headroom-json` path supplies none. A sidecar-derived pair with a zero gradient therefore enters both
-the composite **and** `measured_weight` (0.15 + 0.15 = 0.30 of 0.80). Fixing the score alone does not
-fix coverage; the provenance default must be addressed too.
+### A-2 — Provenance defaults (RESOLVED in code)
 
-### A-2 — Provenance defaults are optimistic in one path and pessimistic in the other (BLOCKER)
+The roadmap claimed `--headroom-json` / unlabelled weight pairs default to
+`measured` / `verified` (`orchestrator.py:225-228`). Current code at
+`orchestrator.py:244-247` defaults `eff_source`/`grad_source` to
+`"unavailable"` and `eff_verif`/`grad_verif` to `"unavailable"` — the
+pessimistic default the roadmap itself advocated. The line number mismatch
+(`225-228` vs `244-247`) reflects unrelated edits to `orchestrator.py` since
+the roadmap was written.
 
-Two opposite defaults coexist:
+Two opposite defaults no longer coexist. The GGUF/safetensors sampled-weight
+path reports `fixture` / `unverified`; the weight-pairs path reports
+`measured` / `verified` only when explicitly declared via
+`--weight-pairs-source-type`; nothing defaults to optimistic provenance.
 
-| Path | Default provenance | Effect |
-|---|---|---|
-| `--headroom-json` / unlabelled weight pairs | `measured` / `verified` (`orchestrator.py:225-228`) | unverified input counted as a real measurement |
-| GGUF weight samples (`cli.py:435-441`) | `fixture` / `unverified` | a real tensor read from a real `.gguf` excluded from coverage |
-
-The GGUF case is measured: a real-file run computed `effective_rank` and produced composite
-0.5906542007068689 with coverage 0.0 — a genuine measurement reported as a neutral prior. That is
-SEAMS.md R-3 / S-09. The `--headroom-json` case is the mirror image and is not yet in SEAMS.md.
+No code change is required — the fix is already in `HEAD`. This section is
+retained as historical context only.
 
 ### A-3 — `effective_rank` accepted from a single truncated tensor (REQUIRED)
 
