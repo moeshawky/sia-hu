@@ -22,13 +22,6 @@ jobs:
       - name: Check distribution
         run: uv run --with twine twine check dist/*
       - name: Inspect wheel contents
-        run: |
-          uv run python -c "
-import glob, zipfile
-whl = glob.glob('dist/*.whl')[0]
-with zipfile.ZipFile(whl) as z:
-    for name in z.namelist():
-        print(name)
-"
+        run: uv run python -c "import glob, zipfile; whl = glob.glob('dist/*.whl')[0]; [print(n) for n in zipfile.ZipFile(whl).namelist()]"
       - name: Publish
         run: uv publish
