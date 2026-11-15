@@ -1,6 +1,6 @@
 # model_headroom
 
-Model Headroom Analyzer — 7 core signals + 2 opt-in gradient diagnostics for training headroom on MoE and dense models. Python package, strict types, 21 frozen dataclasses, 95% test coverage.
+Model Headroom Analyzer — 7 core signals + 2 opt-in gradient diagnostics for training headroom on MoE and dense models. Python package, strict types, 25 frozen dataclasses (27 including acquire/provenance.py), 95% test coverage.
 
 ## Installation
 
@@ -177,7 +177,7 @@ Measured by `ix` across the codebase:
 ## Key Conventions
 
 - **mypy strict = true** — no `Any` without justification
-- **21 frozen dataclasses** in `models/types.py` — all immutable
+- **25 frozen dataclasses (27 including acquire/provenance.py)** in `models/types.py` — all immutable
 - **Weights resolve through `device.py`** — accelerator preferred (cuda, then xpu, then mps), CPU as fallback (NFR-01).
 - **Skipped signals score 0.5** (neutral) in composite score; not_applicable signals are excluded entirely
 - **Provenance-aware scoring** — measured, synthetic, fixture, estimated, imported data classified and weighted separately

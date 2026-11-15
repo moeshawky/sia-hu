@@ -26,7 +26,7 @@ measurements.
 score.
 
 **What it owns:**
-- 21 frozen dataclasses in `models/types.py` — all input/output/error type contracts
+- 25 frozen dataclasses (27 including acquire/provenance.py) in `models/types.py` — all input/output/error type contracts
 - 9 signal modules (7 core + 2 diagnostic) in `signals/`
 - `analysis/orchestrator.py` — runs all signals with timing, assembles `HeadroomReport`
 - `analysis/scoring.py` — weighted composite score → [0.0, 1.0]

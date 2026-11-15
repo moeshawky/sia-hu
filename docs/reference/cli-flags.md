@@ -58,7 +58,8 @@ Settings resolve in order: **CLI flag > env var > config file > default.**
 
 ## model-headroom (authority)
 
-All 20 flags, declared in `src/model_headroom/cli.py:parse_args`:
+All 25 flags, declared in `src/model_headroom/cli.py:parse_args` (5 new
+acquisition flags added in v0.6.0):
 
 | Flag | Purpose |
 |------|---------|
@@ -78,6 +79,11 @@ All 20 flags, declared in `src/model_headroom/cli.py:parse_args`:
 | `--weight-pairs-source-type` | Source type override (measured/synthetic/fixture/estimated/imported) |
 | `--mlp-source-type` | MLP source type override |
 | `--analysis-mode` | Analysis mode (decision_grade requires ≥70% coverage) |
+| `--acquire` | Discover and acquire evidence automatically: resolve checkpoint layout, sample real weight matrices, capture real FFN activations (with --acquire-prompts) |
+| `--acquire-prompts TEXT` | Text to drive a real forward pass for FFN activation acquisition (requires --acquire and a transformers-installable model) |
+| `--acquire-evidence-repo REPO` | Hub repository (model or dataset) to search for published training history (requires --acquire) |
+| `--acquire-evidence-repo-type {models,datasets}` | Repository type for --acquire-evidence-repo (default: models) |
+| `--acquire-lineage-authenticated` | Operator attestation that published training-history artifact belongs to the checkpoint's training lineage (default: false) |
 | `--gradient-diagnostics` | Enable R-08/R-09 diagnostic signals |
 | `--device` | Device for tensor computation: auto (first available accelerator, cuda preferred, else cpu), cuda, or cpu (default: auto) |
 | `--output-format` | Output format (human/json) |

@@ -10,7 +10,7 @@ proposed here.
 
 ## Frozen dataclasses
 
-model_headroom defines **21 frozen dataclasses** (all in `models/types.py`), all
+model_headroom defines **25 frozen dataclasses (27 including acquire/provenance.py)** (all in `models/types.py`), all
 immutable (`frozen=True`). They are the authority's type contracts — every
 input/output/error type flows through them.
 

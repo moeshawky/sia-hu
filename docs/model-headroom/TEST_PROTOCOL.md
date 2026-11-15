@@ -102,7 +102,7 @@ cli.py (entry) → analysis/orchestrator.py → 9 signals/* (7 core + 2 opt-in d
 | Recommendations | `analysis/scoring.py:134` | `generate_recommendations()` | At least 3 actionable strings (R-08) |
 | JSON report | `reporting/json_report.py:50` | `generate_json_report()` | Structured JSON output |
 | Human report | `reporting/human_report.py:72` | `generate_human_report()` | 80-col terminal, max 200 lines |
-| Type contracts | `models/types.py:1` | 21 frozen dataclasses | All input/output/error types |
+| Type contracts | `models/types.py:1` | 25 frozen dataclasses (27 including acquire/provenance.py) | All input/output/error types |
 | Model loader | `models/loader.py:1` | 7 loader functions | Weight extraction, JSON loading |
 
 **7 Signal Modules:**

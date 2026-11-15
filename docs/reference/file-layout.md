@@ -57,7 +57,7 @@ src/
       orchestrator.py  → Runs signals with timing, assembles HeadroomReport
       scoring.py     → Weighted composite score → [0.0, 1.0]
     models/
-      types.py       → 21 frozen dataclasses
+      types.py       → 25 frozen dataclasses (27 including acquire/provenance.py)
       loader.py      → HF weight extraction
       gguf_loader.py → GGUF weight extraction (optional extra)
     reporting/
