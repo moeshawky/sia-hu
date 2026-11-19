@@ -263,6 +263,112 @@ def _coerce_hidden_batch(raw: object, name: str) -> torch.Tensor | None:
     return tensor[-1:].contiguous()
 
 
+def _post_generate_hidden(
+    base: str, model: str, prompt: str, timeout: float
+) -> torch.Tensor | None:
+    """POST to sglang /generate and return the last-token hidden row, or None.
+
+    SGLang 0.5.2 exposes hidden states on ``/generate`` (the OpenAI chat path
+    is broken there: ``"last"`` fails ``bool_parsing`` and boolean ``true``
+    hits an input_ids batch bug). ``return_hidden_states`` must be a JSON
+    boolean. ``meta_info.hidden_states`` is ``list[batch][token][hidden_dim]``;
+    the last-token vector is ``hidden_states[0][-1]``.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    payload = json.dumps(
+        {
+            "text": prompt,
+            "sampling_params": {"temperature": 0, "max_new_tokens": 1},
+            "return_hidden_states": True,
+        }
+    ).encode()
+
+    request = urllib.request.Request(  # noqa: S310 - scheme validated in caller
+        base + "/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+            body = response.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+        return None
+
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+
+    meta = data.get("meta_info") if isinstance(data, dict) else None
+    hidden_states = meta.get("hidden_states") if isinstance(meta, dict) else None
+    if not isinstance(hidden_states, list) or not hidden_states:
+        return None
+    first_batch = hidden_states[0]
+    if not isinstance(first_batch, list) or not first_batch:
+        return None
+    last_token = first_batch[-1]
+    return _coerce_hidden_batch(last_token, "final")
+
+
+def _post_chat_hidden(
+    base: str, model: str, prompt: str, layer_name: str, timeout: float
+) -> torch.Tensor | None:
+    """Fallback: POST to /v1/chat/completions SSE, parse delta.hidden_states.
+
+    Kept as the fallback for sglang versions other than 0.5.2, where the
+    OpenAI chat path is the documented hidden-state route.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    payload = json.dumps(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 1,
+            "temperature": 0,
+            "stream": True,
+            "stream_options": {"include_usage": False},
+            "return_hidden_states": "last",
+        }
+    ).encode()
+
+    request = urllib.request.Request(  # noqa: S310 - scheme validated in caller
+        base + "/v1/chat/completions",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+            for raw_line in response:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                body = line[5:].strip()
+                if not body or body == "[DONE]":
+                    continue
+                try:
+                    chunk = json.loads(body)
+                except json.JSONDecodeError:
+                    continue
+                for choice in chunk.get("choices", []):
+                    hidden = (choice.get("delta") or {}).get("hidden_states")
+                    if hidden is None:
+                        continue
+                    batch = _coerce_hidden_batch(hidden, layer_name)
+                    if batch is not None:
+                        return batch
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+        return None
+    return None
+
+
 def capture_residuals_sglang(
     base_url: str,
     model: str,
@@ -272,73 +378,42 @@ def capture_residuals_sglang(
 ) -> dict[str, ResidualBatch] | None:
     """Capture final-layer last-token residuals from a running sglang server.
 
-    Requires the server to be started with ``--enable-return-hidden-states``
-    (or ``--return-hidden-states-mode full``); without it the server silently
-    omits the field and this returns None rather than an empty batch.
+    Requires the server to be started with ``--enable-return-hidden-states``;
+    without it the server omits the field and this returns None rather than an
+    empty batch.
 
-    sglang returns hidden states only on the streaming path, as an SSE chunk
-    carrying ``choices[].delta.hidden_states``. One request is issued per
-    prompt, because ``last`` mode reports only the final token of each
-    sequence — batching would report one vector per request, not per prompt.
+    The primary route is POST ``/generate`` with a boolean
+    ``return_hidden_states: true`` (SGLang 0.5.2). ``meta_info.hidden_states``
+    is ``list[batch][token][hidden_dim]`` and the last-token vector is
+    ``hidden_states[0][-1]``. The OpenAI ``/v1/chat/completions`` SSE path
+    (``return_hidden_states: "last"``) is kept as a fallback for other sglang
+    versions; on 0.5.2 that path rejects the string value with ``bool_parsing``
+    and the boolean value hits an input_ids batch bug.
+
+    One request is issued per prompt, because ``last`` mode reports only the
+    final token of each sequence — batching would report one vector per
+    request, not per prompt.
 
     Only the final pre-lm_head layer is available through this route: sglang
     captures in ``LogitsProcessor`` at the tensor feeding ``lm_head``, and
     ``qwen4_exp`` does not populate the multi-layer ``aux_hidden_states``
     collector. Returns None if no prompt produced a usable vector.
     """
-    import json
-    import urllib.error
-    import urllib.request
     from urllib.parse import urlparse
 
     parsed = urlparse(base_url)
     if parsed.scheme not in ("http", "https"):
         raise ValueError(f"unsupported sglang URL scheme: {parsed.scheme!r}")
 
+    base = base_url.rstrip("/")
     rows: list[torch.Tensor] = []
-    endpoint = base_url.rstrip("/") + "/v1/chat/completions"
 
     for prompt in prompts:
-        payload = json.dumps(
-            {
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 1,
-                "temperature": 0,
-                "stream": True,
-                "stream_options": {"include_usage": False},
-                "return_hidden_states": "last",
-            }
-        ).encode()
-
-        request = urllib.request.Request(  # noqa: S310 - scheme validated above
-            endpoint,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
-                for raw_line in response:
-                    line = raw_line.decode("utf-8", errors="replace").strip()
-                    if not line.startswith("data:"):
-                        continue
-                    body = line[5:].strip()
-                    if not body or body == "[DONE]":
-                        continue
-                    try:
-                        chunk = json.loads(body)
-                    except json.JSONDecodeError:
-                        continue
-                    for choice in chunk.get("choices", []):
-                        hidden = (choice.get("delta") or {}).get("hidden_states")
-                        if hidden is None:
-                            continue
-                        batch = _coerce_hidden_batch(hidden, layer_name)
-                        if batch is not None:
-                            rows.append(batch)
-        except (urllib.error.URLError, OSError, TimeoutError, ValueError):
-            continue
+        vector = _post_generate_hidden(base, model, prompt, timeout)
+        if vector is None:
+            vector = _post_chat_hidden(base, model, prompt, layer_name, timeout)
+        if vector is not None:
+            rows.append(vector)
 
     if not rows:
         return None

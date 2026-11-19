@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from model_headroom.analysis.orchestrator import run_analysis
 from model_headroom.models.types import (
@@ -197,3 +197,166 @@ class TestOrchestratorWeightSamples:
         comp = report.metadata.get("effective_rank_comparability")
         assert comp is not None
         assert comp["state"] != "absent"
+
+
+class TestOrchestratorTrainingProvenance:
+    """Training telemetry (R-01 loss_saturation, R-02 growth_factor) provenance
+    stamping per ticket 2026-11-16-headroom-training-signal-provenance-defect."""
+
+    _loss_curve: ClassVar[list[Any]] = [
+        LossDataPoint(tokens_trained=100_000_000, validation_loss=2.0),
+        LossDataPoint(tokens_trained=200_000_000, validation_loss=1.5),
+        LossDataPoint(tokens_trained=300_000_000, validation_loss=1.0),
+        LossDataPoint(tokens_trained=400_000_000, validation_loss=0.5),
+        LossDataPoint(tokens_trained=500_000_000, validation_loss=0.3),
+    ]
+
+    _isoflop_points: ClassVar[list[Any]] = [
+        IsoFLOPPoint(compute_flops=1e18, model_params=10_000_000, measured_loss=2.0),
+        IsoFLOPPoint(compute_flops=1e19, model_params=100_000_000, measured_loss=1.5),
+        IsoFLOPPoint(compute_flops=1e20, model_params=1_000_000_000, measured_loss=1.2),
+        IsoFLOPPoint(
+            compute_flops=1e21, model_params=10_000_000_000, measured_loss=1.0
+        ),
+    ]
+
+    def _signal(self, report: Any, name: str) -> Any:
+        return next(s for s in report.signals if s.signal_name == name)
+
+    def test_no_provenance_defaults_to_unavailable(self) -> None:
+        """Without training provenance args, R-01/R-02 stay unavailable (no
+        silent reclassification of historical callers)."""
+        report = run_analysis(
+            model_name="test",
+            model_path="/tmp/test",
+            loss_curve=self._loss_curve,
+            isoflop_points=self._isoflop_points,
+        )
+        r01 = self._signal(report, "loss_saturation")
+        r02 = self._signal(report, "growth_factor")
+        assert r01.status == "computed"
+        assert r02.status == "computed"
+        assert r01.source_type == "unavailable"
+        assert r01.verification_status == "unavailable"
+        assert r02.source_type == "unavailable"
+        assert r02.verification_status == "unavailable"
+
+    def test_training_source_type_stamps_both_signals(self) -> None:
+        """--training-source-type measured stamps R-01 and R-02."""
+        report = run_analysis(
+            model_name="test",
+            model_path="/tmp/test",
+            loss_curve=self._loss_curve,
+            isoflop_points=self._isoflop_points,
+            training_source_type="measured",
+            training_verification_status="verified",
+        )
+        r01 = self._signal(report, "loss_saturation")
+        r02 = self._signal(report, "growth_factor")
+        assert r01.source_type == "measured"
+        assert r01.verification_status == "verified"
+        assert r02.source_type == "measured"
+        assert r02.verification_status == "verified"
+
+    def test_training_provenance_flags_independent_of_signal_status(self) -> None:
+        """Provenance is stamped even when growth_factor is poor_fit (status
+        and provenance are orthogonal per AC2)."""
+        poor_points = [
+            IsoFLOPPoint(
+                compute_flops=1e18, model_params=10_000_000, measured_loss=1.0
+            ),
+            IsoFLOPPoint(
+                compute_flops=1e19, model_params=100_000_000, measured_loss=1.0
+            ),
+            IsoFLOPPoint(
+                compute_flops=1e20, model_params=1_000_000_000, measured_loss=1.0
+            ),
+        ]
+        report = run_analysis(
+            model_name="test",
+            model_path="/tmp/test",
+            loss_curve=self._loss_curve,
+            isoflop_points=poor_points,
+            training_source_type="measured",
+            training_verification_status="verified",
+        )
+        r01 = self._signal(report, "loss_saturation")
+        r02 = self._signal(report, "growth_factor")
+        assert r01.source_type == "measured"
+        assert r01.verification_status == "verified"
+        assert r02.status == "poor_fit"
+        assert r02.source_type == "measured"
+        assert r02.verification_status == "verified"
+
+    def test_five_measured_signals_reaches_full_coverage(self) -> None:
+        """Dense model with all five applicable signals measured reaches
+        coverage >= 0.70 (AC3)."""
+        torch = __import__("torch")
+        report = run_analysis(
+            model_name="test",
+            model_path="/tmp/test",
+            architecture="dense",
+            loss_curve=self._loss_curve,
+            isoflop_points=self._isoflop_points,
+            training_source_type="measured",
+            training_verification_status="verified",
+            weight_pairs=[
+                GradientWeightPair(
+                    gradient=torch.ones(10, 10) * (0.1 + i * 0.1),
+                    weight=torch.ones(10, 10),
+                    layer_name=f"layer_{i}",
+                )
+                for i in range(3)
+            ],
+            weight_pairs_source_type="measured",
+            weight_pairs_verification_status="verified",
+            mlp_activations=[
+                MLPActivations(
+                    activations=torch.ones(2, 10, 64),
+                    layer_name="layer_0",
+                ),
+            ],
+            mlp_source_type="measured",
+            mlp_verification_status="verified",
+        )
+        coverage = report.coverage_metrics
+        assert coverage is not None
+        # All five applicable signals measured -> coverage = 1.0
+        assert coverage.coverage >= 0.70
+
+    def test_three_measured_signals_reports_50_percent(self) -> None:
+        """Dense model with only three measured signals (R-03, R-04, R-05)
+        reports ~50% coverage and is not decision-grade (AC3). R-01/R-02
+        remain unmeasured because no training provenance is supplied."""
+        torch = __import__("torch")
+        report = run_analysis(
+            model_name="test",
+            model_path="/tmp/test",
+            architecture="dense",
+            loss_curve=self._loss_curve,
+            isoflop_points=self._isoflop_points,
+            # No training_source_type -> R-01/R-02 stay "unavailable"
+            weight_pairs=[
+                GradientWeightPair(
+                    gradient=torch.ones(10, 10) * 0.1,
+                    weight=torch.ones(10, 10),
+                    layer_name="layer_0",
+                ),
+            ],
+            weight_pairs_source_type="measured",
+            weight_pairs_verification_status="verified",
+            mlp_activations=[
+                MLPActivations(
+                    activations=torch.ones(2, 10, 64),
+                    layer_name="layer_0",
+                ),
+            ],
+            mlp_source_type="measured",
+            mlp_verification_status="verified",
+        )
+        coverage = report.coverage_metrics
+        assert coverage is not None
+        # R-01/R-02 are NOT measured (no training provenance) so coverage
+        # cannot reach decision-grade threshold even with R-03/R-04/R-05
+        assert coverage.coverage < 0.70
+        assert coverage.decision_grade is False

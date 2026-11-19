@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
 import pytest
 import torch
 
-from model_headroom.refusal.cli import main, parse_args
+from model_headroom.refusal.cli import _apply_chat_template, main, parse_args
 from model_headroom.refusal.report import (
     generate_refusal_json,
     generate_refusal_report,
@@ -468,6 +469,85 @@ class TestSglangPath:
         assert rc == 1
 
 
+class TestChatTemplateFlag:
+    def test_chat_template_wraps_prompts(self) -> None:
+        calls: list[tuple[list[dict[str, str]], bool, bool]] = []
+
+        class _FakeTokenizer:
+            chat_template = "<|im_start|>{content}<|im_end|>"
+
+            def apply_chat_template(self, messages, tokenize, add_generation_prompt):
+                calls.append((messages, tokenize, add_generation_prompt))
+                return f"<wrapped:{messages[0]['content']}>"
+
+        prompts = ["turn one", "turn two"]
+        wrapped = _apply_chat_template(_FakeTokenizer(), prompts)
+        assert wrapped == ["<wrapped:turn one>", "<wrapped:turn two>"]
+        assert len(calls) == 2
+        for (messages, tokenize, add_generation_prompt), prompt in zip(
+            calls, prompts, strict=True
+        ):
+            assert messages == [{"role": "user", "content": prompt}]
+            assert tokenize is False
+            assert add_generation_prompt is True
+
+    def test_chat_template_missing_template_errors(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        try:
+            import transformers
+        except ImportError:
+            pytest.skip("transformers not installed; cannot verify loader path")
+        from model_headroom.refusal.cli import _load_live
+
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+        (model_dir / "config.json").write_text("{}")
+        harmful = tmp_path / "harmful.txt"
+        harmless = tmp_path / "harmless.txt"
+        harmful.write_text("bad prompt\n")
+        harmless.write_text("ok prompt\n")
+
+        class _NoTemplateTokenizer:
+            chat_template = None
+
+        def _fake_tokenizer(*args, **kwargs):
+            return _NoTemplateTokenizer()
+
+        class _FakeModel:
+            def to(self, device):
+                return self
+
+        def _fake_model(*args, **kwargs):
+            return _FakeModel()
+
+        monkeypatch.setattr(
+            transformers.AutoTokenizer, "from_pretrained", _fake_tokenizer
+        )
+        monkeypatch.setattr(
+            transformers.AutoModelForCausalLM, "from_pretrained", _fake_model
+        )
+
+        args = argparse.Namespace(
+            model_path=str(model_dir),
+            harmful_prompts=str(harmful),
+            harmless_prompts=str(harmless),
+            device="cpu",
+            chat_template=True,
+        )
+        assert _load_live(args) is None
+        err = capsys.readouterr().err
+        assert "--chat-template requested but tokenizer has no chat template" in err
+        assert "chat_template" in err
+
+    def test_chat_template_rejected_with_sglang_url(self, capsys) -> None:
+        rc = main(["--chat-template", "--sglang-url", "http://127.0.0.1:30000"])
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert "chat-template cannot be combined with --sglang-url" in err
+        assert "pre-template the prompt files" in err
+
+
 class TestSafetensorsOutput:
     def _safe_open(self, path):
         try:
@@ -706,3 +786,146 @@ class TestRefusalCliErrorInterpolation:
         assert rc == 1
         assert "{report.error_message}" not in err
         assert "layer" in err.lower() or "999" in err
+
+
+class TestDomainLivePath:
+    def _make_args(self, tmp_path: Path, device: str = "cuda") -> argparse.Namespace:
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+        (model_dir / "config.json").write_text(json.dumps({"torch_dtype": "bfloat16"}))
+        domain_prompts = tmp_path / "domain.txt"
+        out_of_domain_prompts = tmp_path / "ood.txt"
+        domain_prompts.write_text("in domain prompt\n")
+        out_of_domain_prompts.write_text("out of domain prompt\n")
+        return argparse.Namespace(
+            model_path=str(model_dir),
+            device=device,
+            domain_prompts=str(domain_prompts),
+            out_of_domain_prompts=str(out_of_domain_prompts),
+            batch_size=8,
+            max_length=512,
+            position="last",
+        )
+
+    def test_sm_aware_dtype_downgrades_bf16_on_sm75(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        try:
+            import transformers
+        except ImportError:
+            pytest.skip("transformers not installed")
+        from model_headroom.refusal.cli import _load_live_model
+
+        recorded: dict[str, object] = {}
+
+        class _FakeModel:
+            def to(self, device):
+                return self
+
+        def _fake_tokenizer(*args, **kwargs):
+            return object()
+
+        def _fake_causal(from_path, **kwargs):
+            recorded["kwargs"] = dict(kwargs)
+            return _FakeModel()
+
+        def _raise_image(*args, **kwargs):
+            raise ValueError("image loader unavailable")
+
+        monkeypatch.setattr(
+            transformers.AutoTokenizer, "from_pretrained", _fake_tokenizer
+        )
+        monkeypatch.setattr(
+            transformers.AutoModelForCausalLM, "from_pretrained", _fake_causal
+        )
+        monkeypatch.setattr(
+            transformers.AutoModelForImageTextToText, "from_pretrained", _raise_image
+        )
+        monkeypatch.setattr(torch.cuda, "get_device_capability", lambda: (7, 5))
+
+        args = self._make_args(tmp_path, device="cuda")
+        result = _load_live_model(args)
+        assert result is not None
+        _model, _tokenizer = result
+        assert recorded["kwargs"]["dtype"] == "float16"
+
+    def test_model_to_called_when_device_map_not_applied(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        try:
+            import transformers
+        except ImportError:
+            pytest.skip("transformers not installed")
+        import builtins
+
+        from model_headroom.refusal.cli import _load_live_model
+
+        real_import = builtins.__import__
+
+        def _fake_import(name, *args, **kwargs):
+            if name == "accelerate":
+                raise ImportError("no accelerate")
+            return real_import(name, *args, **kwargs)
+
+        to_calls: list[str] = []
+
+        class _FakeModel:
+            def to(self, device):
+                to_calls.append(device)
+                return self
+
+        def _fake_tokenizer(*args, **kwargs):
+            return object()
+
+        def _fake_causal(from_path, **kwargs):
+            return _FakeModel()
+
+        def _raise_image(*args, **kwargs):
+            raise ValueError("image loader unavailable")
+
+        monkeypatch.setattr(
+            transformers.AutoTokenizer, "from_pretrained", _fake_tokenizer
+        )
+        monkeypatch.setattr(
+            transformers.AutoModelForCausalLM, "from_pretrained", _fake_causal
+        )
+        monkeypatch.setattr(
+            transformers.AutoModelForImageTextToText, "from_pretrained", _raise_image
+        )
+        monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+        args = self._make_args(tmp_path, device="cuda")
+        result = _load_live_model(args)
+        assert result is not None
+        assert to_calls == ["cuda"]
+
+    def test_load_failure_returns_none_cleanly(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        try:
+            import transformers
+        except ImportError:
+            pytest.skip("transformers not installed")
+        from model_headroom.refusal.cli import _capture_domain_live, _load_live_model
+
+        def _fake_tokenizer(*args, **kwargs):
+            return object()
+
+        def _raise_both(*args, **kwargs):
+            raise ValueError("loader unavailable")
+
+        monkeypatch.setattr(
+            transformers.AutoTokenizer, "from_pretrained", _fake_tokenizer
+        )
+        monkeypatch.setattr(
+            transformers.AutoModelForCausalLM, "from_pretrained", _raise_both
+        )
+        monkeypatch.setattr(
+            transformers.AutoModelForImageTextToText, "from_pretrained", _raise_both
+        )
+
+        args = self._make_args(tmp_path, device="cuda")
+        assert _load_live_model(args) is None
+        result = _capture_domain_live(args, "layer.0")
+        assert result is None
+        assert "failed to load model for domain capture" in capsys.readouterr().err

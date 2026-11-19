@@ -19,10 +19,35 @@ from model_headroom.acquire.activations import (
     dead_neuron_report_from_channel_stats,
     tokenize_prompt,
 )
+from model_headroom.acquire.behavioral import (
+    BehavioralCondition,
+    BehavioralProbeResult,
+    InferenceClient,
+    MockInferenceClient,
+    run_behavioral_probe,
+)
 from model_headroom.acquire.layout import (
     WeightLayout,
     resolve_weight_layout,
     sample_layout_weights,
+)
+from model_headroom.acquire.optimization import (
+    GradientMeasurement,
+    OptimizationProbeResult,
+    run_optimization_probe,
+)
+from model_headroom.acquire.probe_integration import (
+    behavioral_result_to_evidence_bundle,
+    optimization_result_to_evidence_bundles,
+    probe_evidence_to_metadata,
+    probe_to_evidence_bundle,
+)
+from model_headroom.acquire.probes import (
+    ProbeBudget,
+    ProbeResult,
+    ProbeSpec,
+    ProbeStatus,
+    run_probe,
 )
 from model_headroom.acquire.provenance import (
     EvidenceBundle,
@@ -38,24 +63,45 @@ from model_headroom.acquire.published import (
     identify_training_history_artifacts,
     list_repo_tree,
 )
+from model_headroom.acquire.serving import (
+    ServingEngineClient,
+    health_check,
+)
 
 __all__ = [
+    "BehavioralCondition",
+    "BehavioralProbeResult",
     "BranchName",
     "EvidenceBundle",
     "EvidenceProvenance",
     "FFNChannelStats",
+    "GradientMeasurement",
     "HubFile",
-    "ProvenanceClass",
+    "InferenceClient",
+    "MockInferenceClient",
+    "OptimizationProbeResult",
+    "ProbeBudget",
+    "ProbeResult",
+    "ProbeSpec",
+    "ProbeStatus",
     "PublishedAcquisitionError",
     "WeightLayout",
     "acquire_published_loss_evidence",
+    "behavioral_result_to_evidence_bundle",
     "capture_ffn_channel_stats",
     "dead_neuron_report_from_channel_stats",
     "download_artifact",
     "extract_loss_trajectory",
+    "health_check",
     "identify_training_history_artifacts",
     "list_repo_tree",
+    "optimization_result_to_evidence_bundles",
+    "probe_evidence_to_metadata",
+    "probe_to_evidence_bundle",
     "resolve_weight_layout",
+    "run_behavioral_probe",
+    "run_optimization_probe",
+    "run_probe",
     "sample_layout_weights",
     "tokenize_prompt",
 ]

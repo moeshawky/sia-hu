@@ -1,10 +1,11 @@
 """Command-line entry point for refusal-direction extraction.
 
-Three acquisition paths share one spec:
+Four acquisition paths share one spec:
 
 * offline  -- ``--harmful-activations`` / ``--harmless-activations``
 * live     -- ``--model-path`` + ``--harmful-prompts`` / ``--harmless-prompts``
 * recovery -- ``--weight-deltas``
+* sglang   -- ``--sglang-url`` + ``--harmful-prompts`` / ``--harmless-prompts`` (HTTP, final layer only)
 
 None of them couples to the headroom scoring pipeline; this entry point never
 imports the orchestrator.
@@ -17,10 +18,9 @@ import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
-if TYPE_CHECKING:
-    import torch
+import torch
 
 from model_headroom.device import resolve_device
 from model_headroom.models.types import (
@@ -87,7 +87,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--sglang-url",
         help="Base URL of a running sglang server started with "
         "--enable-return-hidden-states; captures final-layer residuals over HTTP "
-        "without loading the model in-process",
+        "without loading the model in-process. Prompts are sent verbatim as raw "
+        "text; no chat template is applied — pre-template instruct-model prompts.",
     )
     parser.add_argument(
         "--sglang-model",
@@ -97,7 +98,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--weight-deltas",
         help="JSON of W - W' deltas from an abliterated checkpoint "
-        '({"deltas": [[...]]}) — recovers r without any activations',
+        '({"deltas": [[...]]}) — recovers r without any activations. Deltas come '
+        "from an external abliteration procedure; this CLI consumes them, it does "
+        "not produce abliterated checkpoints.",
     )
     parser.add_argument(
         "--layer-name",
@@ -182,6 +185,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Tokenisation truncation length during live capture (default: 512)",
     )
     parser.add_argument(
+        "--chat-template",
+        action="store_true",
+        help="Apply the tokenizer chat template (apply_chat_template, "
+        "add_generation_prompt=True) to each prompt before live in-process "
+        "capture. Required for instruct models; off by default. Not compatible "
+        "with --sglang-url.",
+    )
+    parser.add_argument(
         "--output-format",
         choices=["text", "json", "safetensors", "both"],
         default="text",
@@ -262,6 +273,22 @@ def _is_filesystem_shaped(model_path: str) -> bool:
     )
 
 
+def _apply_chat_template(tokenizer: Any, prompts: list[str]) -> list[str] | None:
+    if not getattr(tokenizer, "chat_template", None):
+        return None
+    try:
+        return [
+            tokenizer.apply_chat_template(
+                [{"role": "user", "content": p}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            for p in prompts
+        ]
+    except (AttributeError, TypeError):
+        return None
+
+
 def _load_live(
     args: argparse.Namespace,
 ) -> tuple[list[ResidualBatch], list[ResidualBatch]] | None:
@@ -307,13 +334,15 @@ def _load_live(
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(args.model_path)
-        dtype = torch_dtype(args.model_path)
+        dtype = _sm_aware_dtype(args.model_path, args.device)
         loader_kwargs: dict[str, object] = {"dtype": dtype}
+        device_map_applied = False
         if str(args.device).startswith("cuda"):
             try:
                 import accelerate  # noqa: F401
 
                 loader_kwargs["device_map"] = "auto"
+                device_map_applied = True
             except ImportError:
                 pass
 
@@ -338,6 +367,9 @@ def _load_live(
                 file=sys.stderr,
             )
             return None
+
+        if not device_map_applied:
+            model = model.to(args.device)
     except (OSError, ValueError) as exc:
         print(
             "error: loading model\n"
@@ -347,6 +379,21 @@ def _load_live(
             file=sys.stderr,
         )
         return None
+
+    if args.chat_template:
+        wrapped_h = _apply_chat_template(tokenizer, harmful_prompts)
+        wrapped_hm = _apply_chat_template(tokenizer, harmless_prompts)
+        if wrapped_h is None or wrapped_hm is None:
+            print(
+                "error: --chat-template requested but tokenizer has no chat template\n"
+                "  Cause:  the checkpoint tokenizer does not define a chat_template\n"
+                "  Action: Use a chat/instruct checkpoint, or drop --chat-template\n"
+                "  Exit:   1",
+                file=sys.stderr,
+            )
+            return None
+        harmful_prompts = wrapped_h
+        harmless_prompts = wrapped_hm
 
     discovered = discover_residual_layers(model)
     if not discovered:
@@ -415,6 +462,20 @@ def torch_dtype(model_path: str) -> str:
     except (OSError, json.JSONDecodeError, AttributeError, TypeError):
         return "auto"
     return str(config.get("torch_dtype") or config.get("dtype") or "auto")
+
+
+def _sm_aware_dtype(model_path: str, device: str) -> str:
+    """Resolve the checkpoint dtype string, falling back bfloat16 -> float16
+    on pre-Ampere CUDA (sm < 80) which lacks native bfloat16 compute."""
+    dtype = torch_dtype(model_path)
+    if dtype == "bfloat16" and device == "cuda":
+        try:
+            major, minor = torch.cuda.get_device_capability()
+        except (AssertionError, RuntimeError, TypeError):
+            major, minor = 0, 0
+        if (major, minor) < (8, 0):
+            return "float16"
+    return dtype
 
 
 def _resolve_device(requested: str) -> str | None:
@@ -540,13 +601,15 @@ def _load_live_model(args: argparse.Namespace) -> tuple[Any, Any] | None:
     if not path.exists() and _is_filesystem_shaped(args.model_path):
         raise _ModelPathError(f"--model-path does not exist: {path}")
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
-    dtype = torch_dtype(args.model_path)
+    dtype = _sm_aware_dtype(args.model_path, args.device)
     loader_kwargs: dict[str, object] = {"dtype": dtype}
+    device_map_applied = False
     if str(args.device).startswith("cuda"):
         try:
             import accelerate  # noqa: F401
 
             loader_kwargs["device_map"] = "auto"
+            device_map_applied = True
         except ImportError:
             pass
     model = None
@@ -558,7 +621,9 @@ def _load_live_model(args: argparse.Namespace) -> tuple[Any, Any] | None:
         except (OSError, ValueError, TypeError, AttributeError):
             model = None
     if model is None:
-        return None, None
+        return None
+    if not device_map_applied:
+        model = model.to(args.device)
     return model, tokenizer
 
 
@@ -609,6 +674,20 @@ def _capture_domain_live(
             file=sys.stderr,
         )
         return None
+    if args.chat_template:
+        wrapped_in = _apply_chat_template(tokenizer, in_prompts)
+        wrapped_out = _apply_chat_template(tokenizer, out_prompts)
+        if wrapped_in is None or wrapped_out is None:
+            print(
+                "error: --chat-template requested but tokenizer has no chat template\n"
+                "  Cause:  the checkpoint tokenizer does not define a chat_template\n"
+                "  Action: Use a chat/instruct checkpoint, or drop --chat-template\n"
+                "  Exit:   1",
+                file=sys.stderr,
+            )
+            return None
+        in_prompts = wrapped_in
+        out_prompts = wrapped_out
     in_batches = capture_last_token_residuals(
         model,
         tokenizer,
@@ -710,6 +789,16 @@ def main(argv: list[str] | None = None) -> int:
             "error: weight-deltas cannot carry a domain contrast\n"
             "  Cause:  --weight-deltas was combined with a domain contrast flag\n"
             "  Action: Use --weight-deltas alone, or use activations/prompts for the domain contrast\n"
+            "  Exit:   1",
+            file=sys.stderr,
+        )
+        return 1
+
+    if args.chat_template and args.sglang_url:
+        print(
+            "error: chat-template cannot be combined with --sglang-url\n"
+            "  Cause:  the sglang route sends raw text; no chat template is applied\n"
+            "  Action: pre-template the prompt files instead, or drop --chat-template\n"
             "  Exit:   1",
             file=sys.stderr,
         )

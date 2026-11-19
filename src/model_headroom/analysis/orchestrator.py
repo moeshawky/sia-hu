@@ -18,6 +18,9 @@ from model_headroom.analysis.scoring import (
     generate_recommendations,
 )
 from model_headroom.device import default_device
+
+if TYPE_CHECKING:
+    from model_headroom.acquire.provenance import EvidenceBundle
 from model_headroom.models.loader import (
     detect_architecture,
     detect_architecture_details,
@@ -195,9 +198,12 @@ def run_analysis(
     effective_rank_sample_count: int | None = None,
     weight_pairs_source_type: SourceType | None = None,
     weight_pairs_verification_status: VerificationStatus | None = None,
+    training_source_type: SourceType | None = None,
+    training_verification_status: VerificationStatus | None = None,
     compute_gradient_diagnostics: bool = False,
     weight_samples: list[Any] | None = None,
     device: str | None = None,
+    probe_evidence: list[EvidenceBundle] | None = None,
 ) -> HeadroomReport:
     """Execute all applicable headroom signals and produce a composite report.
     Resolves model type (auto-detect or override), dispatches 7 signal functions
@@ -205,7 +211,14 @@ def run_analysis(
     load_balance, specialization), marks signals as skipped when input data is absent,
     marks load_balance and specialization as single_expert for dense models, selects
     worst-layer results for multi-layer signals, and assembles HeadroomReport with
-    composite score, coverage metrics, and recommendations."""
+    composite score, coverage metrics, and recommendations.
+
+    training_source_type / training_verification_status stamp the provenance class
+    onto the loss_saturation and growth_factor signals when their input data is
+    provided, matching how effective_rank/grad_weight_ratio/dead_neurons are stamped
+    from weight_pairs / mlp_source_type. Defaults to "unavailable" when not supplied,
+    preserving existing behavior for callers that omit them.
+    """
     signals: list[SignalResult] = []
 
     resolved_architecture = architecture or detect_architecture(model_path)
@@ -255,15 +268,26 @@ def run_analysis(
 
     mlp_src: SourceType = mlp_source_type or "unavailable"
     mlp_ver: VerificationStatus = mlp_verification_status or "unavailable"
+    training_src: SourceType = training_source_type or "unavailable"
+    training_ver: VerificationStatus = training_verification_status or "unavailable"
 
     sampling_mode: SamplingMode = effective_rank_sampling_mode or "unknown"
 
     if loss_curve:
+        base = _run_signal(
+            "loss_saturation",
+            analyze_loss_saturation,
+            loss_curve,
+        )
         signals.append(
-            _run_signal(
-                "loss_saturation",
-                analyze_loss_saturation,
-                loss_curve,
+            SignalResult(
+                signal_name=base.signal_name,
+                status=base.status,
+                data=base.data,
+                duration_seconds=base.duration_seconds,
+                error_message=base.error_message,
+                source_type=training_src,
+                verification_status=training_ver,
             )
         )
     else:
@@ -277,11 +301,20 @@ def run_analysis(
         )
 
     if isoflop_points:
+        base = _run_signal(
+            "growth_factor",
+            analyze_growth_factor,
+            isoflop_points,
+        )
         signals.append(
-            _run_signal(
-                "growth_factor",
-                analyze_growth_factor,
-                isoflop_points,
+            SignalResult(
+                signal_name=base.signal_name,
+                status=base.status,
+                data=base.data,
+                duration_seconds=base.duration_seconds,
+                error_message=base.error_message,
+                source_type=training_src,
+                verification_status=training_ver,
             )
         )
     else:
@@ -693,6 +726,13 @@ def run_analysis(
             }
         except Exception as e:
             report_metadata["gradient_diagnostics_error"] = str(e)
+
+    if probe_evidence:
+        from model_headroom.acquire.probe_integration import (
+            probe_evidence_to_metadata,
+        )
+
+        report_metadata["probe_evidence"] = probe_evidence_to_metadata(probe_evidence)
 
     report = HeadroomReport(
         model_name=model_name,

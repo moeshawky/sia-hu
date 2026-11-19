@@ -19,7 +19,12 @@ from model_headroom.analysis.orchestrator import run_analysis
 from model_headroom.analysis.scoring import decision_grade_gaps
 from model_headroom.device import resolve_device
 from model_headroom.download import download_dataset_files, resolve_data_dir
-from model_headroom.models.types import SamplingMode, WeightSample
+from model_headroom.models.types import (
+    SamplingMode,
+    SourceType,
+    VerificationStatus,
+    WeightSample,
+)
 from model_headroom.reporting.human_report import generate_human_report
 from model_headroom.reporting.json_report import generate_json_report
 
@@ -129,6 +134,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--gradient-provenance-file",
         help="Path to JSON with gradient provenance metadata (model_revision, dataset_hash, etc.)",
+    )
+    parser.add_argument(
+        "--training-provenance-file",
+        help="Path to JSON with training telemetry provenance metadata (source_type, verification_status, model_revision, dataset_hash, etc.), nested under a 'provenance' key",
+    )
+    parser.add_argument(
+        "--training-source-type",
+        choices=[
+            "measured",
+            "synthetic",
+            "fixture",
+            "estimated",
+            "imported",
+            "unknown",
+        ],
+        help="Override training telemetry source_type provenance",
+    )
+    parser.add_argument(
+        "--training-verification-status",
+        choices=[
+            "verified",
+            "provenance_incomplete",
+            "unverified",
+        ],
+        help="Override training telemetry verification_status provenance",
     )
     parser.add_argument(
         "--mlp-source-type",
@@ -837,6 +867,35 @@ def main(argv: list[str] | None = None) -> int:
                 source_type=st, verification_status=vs
             )
 
+    training_source_type: SourceType | None = None
+    training_verification_status: VerificationStatus | None = None
+    if args.training_provenance_file:
+        from model_headroom.models.loader import (
+            load_gradient_provenance_diagnostic,
+        )
+
+        outcome = load_gradient_provenance_diagnostic(args.training_provenance_file)
+        if outcome.error is not None:
+            print(
+                _data_file_error(
+                    "training provenance",
+                    args.training_provenance_file,
+                    "--training-provenance-file",
+                    "training provenance JSON",
+                    outcome.error,
+                ),
+                file=sys.stderr,
+            )
+            return 1
+        gp: GradientProvenance = outcome.data
+        training_source_type = gp.source_type
+        training_verification_status = gp.verification_status
+    elif args.training_source_type is not None:
+        training_source_type = args.training_source_type
+        training_verification_status = args.training_verification_status or (
+            "verified" if args.training_source_type == "measured" else "unverified"
+        )
+
     mlp_st: Any = args.mlp_source_type
     mlp_vs: Any = None
     if mlp_st is not None:
@@ -866,6 +925,8 @@ def main(argv: list[str] | None = None) -> int:
             gradient_provenance=gradient_provenance,
             mlp_source_type=mlp_st,
             mlp_verification_status=mlp_vs,
+            training_source_type=training_source_type,
+            training_verification_status=training_verification_status,
             effective_rank_sampling_mode=args.sampling_mode,
             effective_rank_sample_count=args.rank_sample_count,
             effective_rank_parent_shapes=parent_shapes,

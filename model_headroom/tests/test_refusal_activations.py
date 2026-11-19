@@ -445,6 +445,20 @@ class TestSglangCapture:
             length = int(h.headers["Content-Length"])  # type: ignore[attr-defined]
             h.rfile.read(length)  # type: ignore[attr-defined]
             seen.append(1)
+            if h.path == "/generate":  # type: ignore[attr-defined]
+                # Primary path succeeds: no chat fallback, one request per prompt.
+                h.send_response(200)  # type: ignore[attr-defined]
+                h.send_header("Content-Type", "application/json")  # type: ignore[attr-defined]
+                h.end_headers()  # type: ignore[attr-defined]
+                h.wfile.write(  # type: ignore[attr-defined]
+                    json.dumps(
+                        {
+                            "text": " What",
+                            "meta_info": {"hidden_states": [[[1.0, 0.0]]]},
+                        }
+                    ).encode()
+                )
+                return
             h.send_response(200)  # type: ignore[attr-defined]
             h.end_headers()  # type: ignore[attr-defined]
             h.wfile.write(self._sse([[1.0, 0.0]]))  # type: ignore[attr-defined]
@@ -457,3 +471,100 @@ class TestSglangCapture:
         finally:
             server.shutdown()
         assert len(seen) == 3
+
+    def test_generate_path_returns_last_token_vector(self) -> None:
+        from model_headroom.refusal.activations import capture_residuals_sglang
+
+        capture: dict[str, bytes] = {}
+
+        def handler(h: object) -> None:
+            length = int(h.headers["Content-Length"])  # type: ignore[attr-defined]
+            capture["body"] = h.rfile.read(length)  # type: ignore[attr-defined]
+            if h.path != "/generate":  # type: ignore[attr-defined]
+                h.send_response(404)  # type: ignore[attr-defined]
+                h.end_headers()  # type: ignore[attr-defined]
+                return
+            h.send_response(200)  # type: ignore[attr-defined]
+            h.send_header("Content-Type", "application/json")  # type: ignore[attr-defined]
+            h.end_headers()  # type: ignore[attr-defined]
+            h.wfile.write(  # type: ignore[attr-defined]
+                json.dumps(
+                    {
+                        "text": " What",
+                        "meta_info": {"hidden_states": [[[1.0, 2.0, 3.0]]]},
+                    }
+                ).encode()
+            )
+
+        server = self._serve(handler)
+        try:
+            batches = capture_residuals_sglang(
+                f"http://127.0.0.1:{server.server_port}", "m", ["a"]
+            )
+        finally:
+            server.shutdown()
+        assert batches is not None
+        assert batches["final"].activations.shape == (1, 3)
+        assert batches["final"].activations[0].tolist() == [1.0, 2.0, 3.0]
+
+    def test_generate_sends_boolean_return_hidden_states(self) -> None:
+        from model_headroom.refusal.activations import capture_residuals_sglang
+
+        def handler(h: object) -> None:
+            length = int(h.headers["Content-Length"])  # type: ignore[attr-defined]
+            body = h.rfile.read(length)  # type: ignore[attr-defined]
+            assert h.path == "/generate"  # type: ignore[attr-defined]
+            payload = json.loads(body)
+            assert payload["return_hidden_states"] is True
+            h.send_response(200)  # type: ignore[attr-defined]
+            h.send_header("Content-Type", "application/json")  # type: ignore[attr-defined]
+            h.end_headers()  # type: ignore[attr-defined]
+            h.wfile.write(  # type: ignore[attr-defined]
+                json.dumps(
+                    {
+                        "text": " What",
+                        "meta_info": {"hidden_states": [[[9.0, 10.0]]]},
+                    }
+                ).encode()
+            )
+
+        server = self._serve(handler)
+        try:
+            batches = capture_residuals_sglang(
+                f"http://127.0.0.1:{server.server_port}", "m", ["a"]
+            )
+        finally:
+            server.shutdown()
+        assert batches is not None
+        assert batches["final"].activations[0].tolist() == [9.0, 10.0]
+
+    def test_fallback_to_chat_when_generate_missing_hidden_states(self) -> None:
+        from model_headroom.refusal.activations import capture_residuals_sglang
+
+        def handler(h: object) -> None:
+            length = int(h.headers["Content-Length"])  # type: ignore[attr-defined]
+            h.rfile.read(length)  # type: ignore[attr-defined]
+            if h.path == "/generate":  # type: ignore[attr-defined]
+                # No hidden_states: primary path yields nothing.
+                h.send_response(200)  # type: ignore[attr-defined]
+                h.send_header("Content-Type", "application/json")  # type: ignore[attr-defined]
+                h.end_headers()  # type: ignore[attr-defined]
+                h.wfile.write(json.dumps({"text": " What", "meta_info": {}}).encode())  # type: ignore[attr-defined]
+                return
+            # Fallback SSE path.
+            h.send_response(200)  # type: ignore[attr-defined]
+            h.send_header("Content-Type", "text/event-stream")  # type: ignore[attr-defined]
+            h.end_headers()  # type: ignore[attr-defined]
+            h.wfile.write(self._sse([[7.0, 8.0]]))  # type: ignore[attr-defined]
+            h.wfile.write(b"data: [DONE]\n\n")  # type: ignore[attr-defined]
+
+        server = self._serve(handler)
+        try:
+            batches = capture_residuals_sglang(
+                f"http://127.0.0.1:{server.server_port}", "m", ["a"]
+            )
+        finally:
+            server.shutdown()
+        assert batches is not None
+        assert batches["final"].activations.shape == (1, 2)
+        assert batches["final"].activations[0].tolist() == [7.0, 8.0]
