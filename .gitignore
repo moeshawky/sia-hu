@@ -73,6 +73,9 @@ thoughts.jsonl
 .opencode/
 .opencode/agents/*.md
 failed_reason.txt
+.pi/
+SESSION-*.md
+next-session.md
 
 # === Logs ===
 *.log

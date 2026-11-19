@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0b1] - 2026-11-19
+
+Beta release: capture-proxy carrier lands on the release line, hypothesis-driven
+acquisition probes, and refusal live-capture fixes.
+
+### Added
+- `capture-proxy`: full carrier subtree (the v0.6.0 tree shipped only a stub) —
+  OpenAI-compatible proxy (chat, completions, embeddings, rerank,
+  classification, images), JSONL capture with content-addressed blobs,
+  headroom + routed-experts sidecars, structural task classification by
+  request shape, native rclone `--sync`, and ticketed design docs (002-007,
+  EMO-001, INDEX, LEDGER).
+- `model_headroom` acquisition probes: `acquire/probes.py` (ProbeSpec,
+  ProbeBudget, ProbeResult with seed/timing/budget enforcement — failed
+  probes stay inconclusive, never converted into negative findings),
+  behavioral probes over injectable inference clients, optimization probes on
+  disposable PyTorch copies, SGLang/vLLM serving client, EvidenceBundle
+  integration.
+- Refusal `--chat-template` flag: wraps prompts via
+  `apply_chat_template(..., add_generation_prompt=True)` for instruct models
+  on the live in-process paths.
+- `docs/guides/runtime-refusal-ablation.md`: refusal operator guide with
+  TIER-A live-execution evidence (Tesla T4, 2026-11-19).
+
+### Fixed
+- Refusal live capture on T4 (sm_75): SM-aware fp16 dtype, explicit device
+  move when device_map is not applied, clean `None` on load failure — both
+  the harmful/harmless and domain-contrast paths.
+- `capture_residuals_sglang` on SGLang 0.5.2: boolean `return_hidden_states`
+  via `POST /generate` (the chat-completions SSE path is broken on 0.5.2;
+  kept as fallback).
+- R-01/R-02: stamp training provenance so decision-grade is reachable.
+- capture-proxy ticket 005: routing injection implemented with tests;
+  obsolete native-route tests removed.
+
+### Changed
+- Version 0.6.0 → 0.7.0b1 (beta).
+
 ## [0.6.0] - 2026-11-15
 
 ### Added
