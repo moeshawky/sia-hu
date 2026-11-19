@@ -10,6 +10,7 @@ import asyncio
 import glob
 import json
 import os
+import subprocess
 import sys
 import time
 import uuid
@@ -517,6 +518,7 @@ class TestHeadroomWriterUnit:
         # keys and the DEFER-4 expert_id key on every pair.
         assert set(pair.keys()) == {
             "gradient",
+            "gradient_status",
             "weight",
             "layer_name",
             "expert_id",
@@ -936,8 +938,21 @@ class TestHeadroomIntegration:
         assert len(records) == 1
         assert records[0]["headroom"] is None
         assert not (Path(base) / "headroom").exists()
-        # off mode never imports the tensor stack
-        assert "safetensors" not in sys.modules
+        # off mode never imports the tensor stack — probed in a fresh
+        # interpreter so other tests' heavy imports cannot mask a regression
+        probe = (
+            "import sys\n"
+            "from capture_proxy.app import CaptureProxyApp\n"
+            "CaptureProxyApp()\n"
+            "assert 'safetensors' not in sys.modules\n"
+        )
+        r = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "CAPTURE_BASE_PATH": str(Path(base) / "probe")},
+        )
+        assert r.returncode == 0, r.stderr
 
     def test_non_streaming_writes_sidecar_and_ref(self, headroom_proxy):
         proxy, base, _model_dir, mock = headroom_proxy
@@ -984,6 +999,7 @@ class TestHeadroomIntegration:
         pairs = json.loads(Path(weight_ref).read_text())["pairs"]
         assert set(pairs[0].keys()) == {
             "gradient",
+            "gradient_status",
             "weight",
             "layer_name",
             "expert_id",

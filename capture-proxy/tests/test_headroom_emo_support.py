@@ -514,6 +514,7 @@ def test_capture_weight_pairs_writes_file_for_emo(tmp_path):
         # provenance keys plus the DEFER-4 expert_id key, 2-D, gradient matches.
         assert set(pair.keys()) == {
             "gradient",
+            "gradient_status",
             "weight",
             "layer_name",
             "expert_id",

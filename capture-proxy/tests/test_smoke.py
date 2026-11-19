@@ -92,8 +92,8 @@ class TestPortParsingBoundary:
             call_kwargs = mock_uvicorn.run.call_args
             assert call_kwargs[1]["port"] == 0
 
-    def test_negative_port_is_valid_int(self) -> None:
-        """CAPTURE_PORT=-1 is parsed to int -1 (int() allows negatives)."""
+    def test_negative_port_rejected(self, capsys) -> None:
+        """CAPTURE_PORT=-1 is rejected at startup (port out of range, exit 2)."""
         import os
         from unittest.mock import patch
 
@@ -103,13 +103,13 @@ class TestPortParsingBoundary:
         ):
             from capture_proxy.__main__ import main
 
-            main(args=[])
-            mock_uvicorn.run.assert_called_once()
-            call_kwargs = mock_uvicorn.run.call_args
-            assert call_kwargs[1]["port"] == -1
+            rc = main(args=[])
+            assert rc == 2
+            mock_uvicorn.run.assert_not_called()
+            assert "port out of range" in capsys.readouterr().err
 
-    def test_large_port_is_valid_int(self) -> None:
-        """CAPTURE_PORT=99999 is parsed to int 99999."""
+    def test_large_port_rejected(self, capsys) -> None:
+        """CAPTURE_PORT=99999 is rejected at startup (port out of range, exit 2)."""
         import os
         from unittest.mock import patch
 
@@ -119,10 +119,10 @@ class TestPortParsingBoundary:
         ):
             from capture_proxy.__main__ import main
 
-            main(args=[])
-            mock_uvicorn.run.assert_called_once()
-            call_kwargs = mock_uvicorn.run.call_args
-            assert call_kwargs[1]["port"] == 99999
+            rc = main(args=[])
+            assert rc == 2
+            mock_uvicorn.run.assert_not_called()
+            assert "port out of range" in capsys.readouterr().err
 
 
 class TestHelpFlag:

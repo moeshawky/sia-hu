@@ -99,7 +99,7 @@ def tiny_moe_dir(tmp_path: Path, stack: tuple[Any, Any]) -> Path:
 
 
 class TestDefaultLoaderRealIO:
-    def test_round_trips_values_shape_and_zeros(
+    def test_round_trips_values_shape_and_absent_gradient(
         self, tmp_path: Path, tiny_moe_dir: Path, stack: tuple[Any, Any]
     ) -> None:
         torch, _ = stack
@@ -110,7 +110,7 @@ class TestDefaultLoaderRealIO:
             bundle.weight
             == torch.arange(32, dtype=torch.float32).reshape(4, 8).tolist()
         )
-        assert bundle.gradient == [[0.0] * 8 for _ in range(4)]
+        assert bundle.gradient is None
         assert bundle.parent_shape == (4, 8)
         assert bundle.truncated is False
 
