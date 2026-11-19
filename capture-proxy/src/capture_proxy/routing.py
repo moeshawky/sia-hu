@@ -10,7 +10,8 @@ Depends: std (array, asyncio, base64, binascii, contextlib, json,
     datetime, pathlib)
 Provides: decode_routed_experts, extract_routed_experts_b64,
     parse_routing_shape, DecodedRoutedExperts, RoutedExpertsLogger,
-    RoutedExpertsWriter, ROUTING_ARTIFACT_SUFFIX, ROUTING_FILENAME
+    RoutedExpertsWriter, ROUTING_ARTIFACT_SUFFIX, ROUTING_FILENAME,
+    ROUTED_EXPERTS_FLAG
 
 Invariants:
   - off mode (flag unset/invalid): no writer built, no per-request work
@@ -46,6 +47,15 @@ from typing import Any, NamedTuple
 ROUTING_ARTIFACT_SUFFIX = ".routing.json"
 
 ROUTING_FILENAME = "{capture_id}" + ROUTING_ARTIFACT_SUFFIX
+
+# Request flag the proxy injects upstream when the routing sidecar is
+# armed. SGLang attaches the routed-experts blob to the
+# response only when the request carries this key as true
+# (protocol.py:896, default False); passive capture alone therefore
+# sees zero routing data on normal traffic. The proxy never overrides
+# a client-set value — a flag explicitly present in the client body
+# (true or false) wins over injection.
+ROUTED_EXPERTS_FLAG = "return_routed_experts"
 
 # {capture_id}/LxK shape config, e.g. "48x10" for the CYBER-FROST
 # qwen4_exp artifact. The parser accepts no hardcoded default shape:
@@ -132,7 +142,7 @@ def extract_routed_experts_b64(
 ) -> str | None:
     """Find the routed_experts base64 string in an upstream response.
 
-    Check order (ticket 003 §6, proven launch 2026-10-13): top-level
+    Check order (proven launch 2026-10-13): top-level
     ``sglext.routed_experts`` FIRST — the carrier SGLang actually uses
     for both chat and completions — then top-level
     ``meta_info.routed_experts`` and each choice's ``meta_info``

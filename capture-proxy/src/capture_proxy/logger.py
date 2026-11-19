@@ -243,8 +243,10 @@ class CaptureLogger:
 
         Invariants:
           - Deterministic: same identifier → same filename
-          - Output contains no "/" or ".." sequence — safe to join under
-            the index directory
+          - Output contains no "/" sequence — safe to join under
+            the index directory. Note: "." is in the safe charset, so a ".."
+            sequence is possible in the prefix; the digest suffix and exact-id
+            filter on read neutralize any collision risk.
           - Distinct identifiers map to distinct filenames with
             overwhelming probability; residual collisions are neutralized
             by read_index()'s exact-id line filter

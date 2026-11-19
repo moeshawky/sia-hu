@@ -3,7 +3,7 @@ Capture Proxy Application
 
 Owns: Route registration, middleware lifecycle, startup/shutdown, streaming tee
 Depends: fastapi, httpx, capture_proxy modules
-Provides: FastAPI app with /health, /v1/models, /v1/chat/completions, /v1/completions, /v1/embeddings, /v1/rerank, /v1/classification, /v1/images/generations, /v1/sessions, /v1/sessions/{id}/captures, /v1/users, /v1/users/{id}/captures
+Provides: FastAPI app with /health, /v1/models, /v1/chat/completions, /v1/completions, /v1/embeddings, /v1/rerank, /v1/classification, /v1/images/generations, /v1/systemone, /v1/classify, /v1/batch-classify, /v1/ner, /v1/batch-ner, /v1/timeseries, /v1/batch-timeseries, /v1/sessions, /v1/sessions/{id}/captures, /v1/users, /v1/users/{id}/captures
 
 Invariants:
   - Non-streaming responses logged BEFORE return to client; streaming responses logged in generator finally block — INV-2
@@ -18,6 +18,7 @@ Invariants:
   - Routed-experts routing sidecars ({capture_id}.routing.json under {base_path}/routing/) are scheduled beside the headroom spawn, fire-and-forget, and never modify raw/ or errors/ bytes; off by default (CAPTURE_ROUTED_EXPERTS unset)
   - Every new CaptureRecord carries a non-None user_id (x-user-id > Authorization hash > "anonymous"); session/user index appends are O(1), never raise, and query endpoints read ONLY {base_path}/index/ files — never raw/ JSONL scans
   - /v1/classification and /v1/images/generations are non-streaming OpenAI-passthrough routes: no backend translation branch, no ollama rejection, no stream field — the upstream body is forwarded and returned unchanged
+  - /v1/systemone, /v1/classify, /v1/batch-classify, /v1/ner, /v1/batch-ner, /v1/timeseries, /v1/batch-timeseries are gpu-arm native JSON routes: body-verbatim passthrough with no declared request schema and no required-field validation — the body forwards as sent, the upstream response returns unchanged, and both sides are captured. Multipart /v1/transcribe is deliberately NOT registered
 """
 
 from __future__ import annotations
@@ -72,6 +73,7 @@ from capture_proxy.models import (
 )
 from capture_proxy.names import HEADROOM_SIGNALS, SIGNAL_KEYS
 from capture_proxy.routing import (
+    ROUTED_EXPERTS_FLAG,
     RoutedExpertsWriter,
     extract_routed_experts_b64,
     parse_routing_shape,
@@ -108,6 +110,11 @@ def _compute_sha256(data: dict[str, Any] | list[Any] | str) -> str:
 
 _logger = logging.getLogger(__name__)
 _capture_write_warned = False
+# Distinct raw GGUF path strings already warned about, so the GGUF refusal is
+# logged once per path (once per distinct model deployment) rather than once per
+# eligible capture. The set lives for the process lifetime and is never reset;
+# tests use distinct paths to stay independent of it.
+_gguf_warned_paths: set[str] = set()
 
 
 def _blob_store_enabled() -> bool:
@@ -265,7 +272,7 @@ class CaptureProxyApp:
         )
         self._upstream_client = UpstreamClient(upstream_url=self._upstream_url)
 
-        self.app = FastAPI(title="capture-proxy", version="0.2.0")
+        self.app = FastAPI(title="capture-proxy", version="0.3.0")
         self._register_routes()
 
     @staticmethod
@@ -711,6 +718,65 @@ class CaptureProxyApp:
         async def image_generations(request: Request) -> Response:
             return await self._handle_image_request(request=request)
 
+        # gpu-arm native JSON routes: body-verbatim passthrough.
+        # No declared schema, no required-field validation — the body forwards
+        # as sent and the upstream response returns unchanged.
+        @self.app.post("/v1/systemone", response_model=None)
+        async def systemone(request: Request) -> Response:
+            return await self._handle_native_passthrough(
+                request=request,
+                upstream_path="/v1/systemone",
+                request_type="systemone",
+            )
+
+        @self.app.post("/v1/classify", response_model=None)
+        async def classify(request: Request) -> Response:
+            return await self._handle_native_passthrough(
+                request=request,
+                upstream_path="/v1/classify",
+                request_type="classify",
+            )
+
+        @self.app.post("/v1/batch-classify", response_model=None)
+        async def batch_classify(request: Request) -> Response:
+            return await self._handle_native_passthrough(
+                request=request,
+                upstream_path="/v1/batch-classify",
+                request_type="batch_classify",
+            )
+
+        @self.app.post("/v1/ner", response_model=None)
+        async def ner(request: Request) -> Response:
+            return await self._handle_native_passthrough(
+                request=request,
+                upstream_path="/v1/ner",
+                request_type="ner",
+            )
+
+        @self.app.post("/v1/batch-ner", response_model=None)
+        async def batch_ner(request: Request) -> Response:
+            return await self._handle_native_passthrough(
+                request=request,
+                upstream_path="/v1/batch-ner",
+                request_type="batch_ner",
+            )
+
+        @self.app.post("/v1/timeseries", response_model=None)
+        async def timeseries(request: Request) -> Response:
+            return await self._handle_native_passthrough(
+                request=request,
+                upstream_path="/v1/timeseries",
+                request_type="timeseries",
+            )
+
+        @self.app.post("/v1/batch-timeseries", response_model=None)
+        async def batch_timeseries(request: Request) -> Response:
+            return await self._handle_native_passthrough(
+                request=request,
+                upstream_path="/v1/batch-timeseries",
+                request_type="batch_timeseries",
+            )
+
         @self.app.get("/v1/sessions", response_model=None)
         async def list_sessions(limit: int = 100) -> IdListResponse:
             """List known session ids, most recently active first.
@@ -761,10 +827,19 @@ class CaptureProxyApp:
         upstream_path: str,
         response_object: str,
     ) -> Response | StreamingResponse:
-        """Handle chat/completions with alias rewrite before hash.
+        """Handle chat/completions with alias rewrite and routing injection.
 
-        Invariant: rewrite-before-hash — the public model id is replaced
-            with the upstream id after validation and before SHA-256.
+        Invariants:
+            - rewrite-before-hash — the public model id is replaced with
+              the upstream id after validation and before SHA-256
+            - routing-injection — when the routing sidecar
+              is armed and the client did not set the flag, the FORWARDED
+              body gains return_routed_experts=true; a client-set flag
+              (true or false) is never overridden. The raw capture keeps
+              the client-sent body and request_body_sha256 covers the
+              forwarded body — the injected flag is the one canonical
+              diff. Streaming and
+              non-streaming share this path.
         """
         body_bytes = await request.body()
         try:
@@ -827,7 +902,23 @@ class CaptureProxyApp:
         forwarded_body, alias_original, alias_forwarded = rewrite_request_model(
             body_dict, self._aliases
         )
-        request_sha256 = _compute_sha256(forwarded_body)
+        # Routing injection: an armed sidecar requires the
+        # upstream to see return_routed_experts=true, or the response
+        # carries no routing blob and passive capture sees nothing.
+        # Off mode costs one None check; a client-set flag (true or
+        # false) is never overridden.
+        upstream_body = forwarded_body
+        if (
+            self._routed_experts_writer is not None
+            and ROUTED_EXPERTS_FLAG not in forwarded_body
+        ):
+            upstream_body = {**forwarded_body, ROUTED_EXPERTS_FLAG: True}
+            # request_sha256 below covers upstream_body; store its
+            # preimage so the handle resolves:
+            # the injected flag is the one canonical diff against the
+            # client-sent body kept in record.request.
+            self._blob_store.put(upstream_body)
+        request_sha256 = _compute_sha256(upstream_body)
         messages_list = forwarded_body.get("messages", [])
         messages_sha256 = _compute_sha256(messages_list)
         public_model = (
@@ -863,7 +954,7 @@ class CaptureProxyApp:
             if is_stream:
                 return await self._handle_streaming(
                     headers,
-                    forwarded_body,
+                    upstream_body,
                     record,
                     start_time,
                     upstream_path,
@@ -871,7 +962,7 @@ class CaptureProxyApp:
                 )
             return await self._handle_non_streaming(
                 headers,
-                forwarded_body,
+                upstream_body,
                 record,
                 start_time,
                 upstream_path,
@@ -1742,6 +1833,158 @@ class CaptureProxyApp:
                 content={"error": "upstream unavailable"},
             )
 
+    async def _handle_native_passthrough(
+        self, request: Request, upstream_path: str, request_type: str
+    ) -> Response:
+        """Forward a gpu-arm native JSON route verbatim and capture both sides.
+
+        Shared passthrough for the seven native routes gpu-arm serves
+        (/v1/systemone, /v1/classify, /v1/batch-classify, /v1/ner,
+        /v1/batch-ner, /v1/timeseries, /v1/batch-timeseries). Unlike the
+        OpenAI-shaped /v1/classification handler there is no declared request
+        schema and no required-field validation: the body is forwarded as sent
+        and the upstream response is returned unchanged, so the proxy never
+        invents a shape the checkpoint never had.
+
+        Args:
+            request: FastAPI Request carrying a native JSON body (a model id
+                plus route-specific fields such as text, texts, or state).
+            upstream_path: Upstream route to forward to — the same path the
+                client called.
+            request_type: Endpoint-family label stored on the capture (e.g.
+                "classify", "batch_classify"). A label for task inference and
+                headroom eligibility, never a routing key.
+
+        Returns:
+            Response: The upstream JSON response passed through unchanged —
+                status code, body, and content type.
+                - 200: Successful native response
+                - 422: Invalid JSON, or a JSON body that is not an object
+                - 4xx/5xx: Upstream status propagated verbatim with its body
+                - 502: Upstream unavailable (connection failure)
+
+        Raises: None
+
+        Invariants:
+            - Before: Request body not yet parsed
+            - After: CaptureRecord written with request_type=<request_type>;
+              early-validation 4xx returns exit before capture and are not
+              logged
+            - Body forwarded verbatim: only the top-level model field is
+              rewritten when an alias maps it, and request_body_sha256 hashes
+              that forwarded body (INV-4); record.request mirrors it
+            - Upstream response body passed through unchanged; no declared
+              response contract is enforced, so a wider native shape forwards
+            - Alias sanitize-before-log-and-serialize: the upstream model id
+              is remapped to the public id before capture and client
+            - No backend branch: every backend forwards to upstream_path
+              unchanged (native routes do not stream)
+            - task is resolved from the public model id and is None when
+              CAPTURE_MODEL_TASKS is off or has no entry; headroom is a
+              fire-and-forget no-op here because the native request types are
+              outside the eligible (chat/completion/classification/image) set
+            - A capture-disk OSError is suppressed — the client response is
+              unaffected
+        """
+        body_bytes = await request.body()
+        try:
+            body_dict: dict[str, Any] = json.loads(body_bytes) if body_bytes else {}
+        except json.JSONDecodeError:
+            return JSONResponse(status_code=422, content={"error": "invalid JSON"})
+        if not isinstance(body_dict, dict):
+            return JSONResponse(
+                status_code=422, content={"error": "body must be a JSON object"}
+            )
+
+        headers = dict(request.headers)
+        session_id = self._session_resolver.resolve(headers)
+        turn_id = str(uuid.uuid4())
+        capture_id = str(uuid.uuid4())
+        created_at = datetime.now(UTC).isoformat()
+        client_ip = request.client.host if request.client else "unknown"
+        client_ua = headers.get("user-agent", "")
+
+        runtime_snapshot = await asyncio.to_thread(
+            RuntimeSnapshot.get,
+            capture_base_path=self._capture_base_path,
+            backend=self._backend,
+        )
+
+        forwarded_body, alias_original, alias_forwarded = rewrite_request_model(
+            body_dict, self._aliases
+        )
+        request_sha256 = _compute_sha256(forwarded_body)
+        raw_model = body_dict.get("model")
+        public_model = (
+            alias_original
+            if alias_original is not None
+            else (raw_model if isinstance(raw_model, str) else "")
+        )
+
+        record = CaptureRecord(
+            session_id=session_id,
+            user_id=self._session_resolver.resolve_user_id(headers),
+            turn_id=turn_id,
+            capture_id=capture_id,
+            created_at=created_at,
+            latency_ms=0.0,
+            client_ip=client_ip,
+            client_user_agent=client_ua,
+            model=public_model,
+            request_model_original=alias_original,
+            request_model_forwarded=alias_forwarded,
+            run_id=runtime_snapshot.run_id,
+            runtime_settings=runtime_snapshot.settings,
+            request=forwarded_body,
+            request_body_sha256=request_sha256,
+            messages_sha256="",
+            attempt_number=1,
+            upstream_status=200,
+            routing=None,
+            request_type=request_type,
+            task=self._resolve_task(public_model),
+        )
+
+        start_time = time.monotonic()
+        try:
+            upstream_resp = await self._upstream_client.proxy(
+                method="POST",
+                path=upstream_path,
+                headers=headers,
+                body=forwarded_body,
+                stream=False,
+            )
+
+            elapsed_ms = (time.monotonic() - start_time) * 1000
+            record.latency_ms = elapsed_ms
+            sanitized_response = sanitize_response_model(
+                upstream_resp.body, self._aliases
+            )
+            record.response = sanitized_response
+            record.upstream_status = upstream_resp.status_code
+
+            self._spawn_headroom(record)
+            self._log_capture(record)
+
+            content = (
+                json.dumps(sanitized_response).encode() if sanitized_response else b""
+            )
+            return Response(
+                content=content,
+                status_code=upstream_resp.status_code,
+                media_type="application/json",
+            )
+        except Exception as e:
+            elapsed_ms = (time.monotonic() - start_time) * 1000
+            record.latency_ms = elapsed_ms
+            record.upstream_status = 502
+            record.error_body = str(e)
+            self._log_capture(record)
+            return JSONResponse(
+                status_code=502,
+                content={"error": "upstream unavailable"},
+            )
+
     async def _handle_streaming(
         self,
         headers: dict[str, str],
@@ -2138,7 +2381,9 @@ class CaptureProxyApp:
         (chat, completion, classification, image), valid-UUID capture_id,
         upstream success (status < 400 and no error_body),
         runtime_settings.model_path pointing at an existing directory,
-        and the interval samples this capture.
+        and the interval samples this capture. A ``.gguf`` model_path is refused
+        before the directory gate with a one-time warning naming the path; the
+        sidecar reads safetensors checkpoints only and emits nothing for GGUF.
 
         Args:
             record: Finalized CaptureRecord (status/error fields complete).
@@ -2173,6 +2418,19 @@ class CaptureProxyApp:
         if not isinstance(model_path_raw, str) or not model_path_raw:
             return
         model_path = Path(model_path_raw)
+        if model_path_raw.lower().endswith(".gguf"):
+            # GGUF is a non-goal for the sidecar (safetensors-only by contract).
+            # Refuse loudly and deduplicated: one warning per distinct raw path,
+            # then return with record.headroom still None — no silent inertness.
+            if model_path_raw not in _gguf_warned_paths:
+                _gguf_warned_paths.add(model_path_raw)
+                _logger.warning(
+                    "Headroom sidecar refused GGUF model path %r: the sidecar reads "
+                    "safetensors checkpoints only, so no sidecar will be emitted "
+                    "for this GGUF model.",
+                    model_path_raw,
+                )
+            return
         if not model_path.is_dir():
             return
         try:

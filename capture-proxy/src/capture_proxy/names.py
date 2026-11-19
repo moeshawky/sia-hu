@@ -12,7 +12,7 @@ vocabularies (HEADROOM_SIGNALS for the CLI/env knob, SIGNAL_KEYS for the emitted
 sidecar keys). They drifted: the CLI accepted `loss` and `isoflop` while the
 sidecar emitted `loss_saturation` and `growth_factor`, so 2 of 6 CLI names did
 not name the authority's signals. A name that resolves differently on the way in
-and on the way out is exactly the shape that made EMO-001 hard to diagnose.
+and on the way out is exactly the shape that made this failure mode hard to diagnose.
 
 Invariants:
   - every name in HEADROOM_SIGNALS resolves to exactly one name in SIGNAL_KEYS

@@ -2,7 +2,7 @@
 Data Models
 
 Owns: Pydantic models for capture proxy request/response schema
-Depends on: pydantic>=2.0, pathlib (std), uuid (std)
+Depends on: pydantic>=2.14, pathlib (std), uuid (std)
 Provides: UsageNormalized, StreamDiagnostics, HeadroomRef, CapturedHeadroom, CaptureRecord, ChatCompletionRequest, EmbeddingRequest, EmbeddingResponse, RerankRequest, ClassificationRequest, ClassificationResponse, ImageRequest, ImageResponse, HealthResponse
 
 Invariants:
