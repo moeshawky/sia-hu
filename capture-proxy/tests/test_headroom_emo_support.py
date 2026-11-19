@@ -1,4 +1,4 @@
-"""Tests for MoE expert-tensor support in the headroom sidecar.
+"""Tests for MoE expert-tensor support in the headroom sidecar (EMO-001).
 
 Covers: structural MoE detection for a model_type absent from
 _MOE_MODEL_TYPES, the reachable ``architectures`` substring fallback, expert
@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from model_headroom.models import loader as _authority_loader
 
 from capture_proxy.headroom import (
     HeadroomWriter,
@@ -26,7 +27,6 @@ from capture_proxy.headroom import (
     _detect_architecture,
     _resolve_tensor_name,
 )
-from model_headroom.models import loader as _authority_loader
 
 SHARD = "model-00001-of-00002.safetensors"
 PROJS = ("gate", "up", "down")
@@ -101,14 +101,14 @@ def _fake_loader(rows: int = 2, cols: int = 3):
 
     Returns:
         Callable[[Path, str], TensorBundle]: Loader over a fixed rows x cols
-            weight with no gradient (gradient is None). The proxy serves
-            inference and observes no training gradient; the artifact records
-            an absent gradient.
+            weight whose gradient is an all-zeros array of the SAME shape.
+            Zeros are the expected weight-only result (ADR-002), not a bug.
     """
 
     def loader(model_path: Path, tensor_name: str) -> TensorBundle:
         weight = [[float(i * cols + j) for j in range(cols)] for i in range(rows)]
-        return TensorBundle(weight=weight, gradient=None)
+        gradient = [[0.0] * cols for _ in range(rows)]
+        return TensorBundle(weight=weight, gradient=gradient)
 
     return loader
 
@@ -473,10 +473,11 @@ def test_empty_object_config_is_unknown(tmp_path):
 def test_capture_weight_pairs_writes_file_for_emo(tmp_path):
     """An EMO fixture produces a weight-pair file with >= 3 usable pairs.
 
-    Gradient assertions are now absent-gradient: the artifact records
-    gradient_status "not_captured" and gradient None. Shape-parity against a
-    gradient no longer exists — a null gradient has no shape, so this test
-    checks the status value instead of a (nonexistent) gradient shape.
+    Gradient assertions are SHAPE PARITY plus all-zeros values, never
+    "non-empty". ADR-002 (headroom.py:393-395) makes the sidecar emit a real
+    all-zeros gradient of the weight's shape when no training hook ran, so a
+    len(gradient) > 0 assertion would pass on an all-zeros array and measure
+    nothing about gradient content.
     """
     d = _model_dir(
         tmp_path, keys={**EMO_EXPERT, "model.layers.0.mlp.gate.weight": SHARD}
@@ -513,7 +514,6 @@ def test_capture_weight_pairs_writes_file_for_emo(tmp_path):
         # provenance keys plus the DEFER-4 expert_id key, 2-D, gradient matches.
         assert set(pair.keys()) == {
             "gradient",
-            "gradient_status",
             "weight",
             "layer_name",
             "expert_id",
@@ -524,8 +524,13 @@ def test_capture_weight_pairs_writes_file_for_emo(tmp_path):
         assert pair["expert_id"] == 0
         assert len(pair["weight"]) == 2
         assert len(pair["weight"][0]) == 3
-        assert pair["gradient"] is None
-        assert pair["gradient_status"] == "not_captured"
+        # Shape parity measured against THIS pair's own weight, element-wise
+        # by row — a lower bound like len(gradient) > 0 would not catch a
+        # gradient of the wrong shape.
+        assert len(pair["gradient"]) == len(pair["weight"])
+        assert [len(g) for g in pair["gradient"]] == [len(w) for w in pair["weight"]]
+        # Values: all zeros is the EXPECTED weight-only result, not a bug.
+        assert pair["gradient"] == [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
 
 
 # ---------------------------------------------------------------------------
@@ -576,8 +581,9 @@ def test_truncation_expert_shaped_tensor(tmp_path):
     # Truncated to 512 rows (half of 1024)
     assert len(pair["weight"]) == 512
     assert len(pair["weight"][0]) == 2048
-    # Gradient absent: the artifact records gradient_status "not_captured"
-    assert pair["gradient"] is None
+    # Gradient truncated to same shape as weight
+    assert len(pair["gradient"]) == 512
+    assert len(pair["gradient"][0]) == 2048
 
 
 def test_truncation_cap_below_one_expert_row(tmp_path):

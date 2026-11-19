@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""verify_routed_experts.py — proving-launch probe for the routed-experts sidecar.
+"""verify_routed_experts.py — proving-launch probe for ticket 003 item 1.
 
 Sends one short completion to a base URL, then asserts the response's
 routed-experts blob (carrier: top-level sglext.routed_experts, per the

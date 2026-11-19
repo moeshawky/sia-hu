@@ -584,7 +584,8 @@ class TestStreamBodyHashIntegrity:
         """The DoD: a stream file alone must yield what was asked.
 
         No cross-referencing against the paired raw record, no blob lookup.
-        If this fails, the capture is the unrecoverable shape — data loss.
+        If this fails, the capture is the unrecoverable shape ticket 006
+        called data loss.
         """
         base = self._stream_request(tmp_path)
         files = glob.glob(

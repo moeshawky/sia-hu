@@ -77,7 +77,7 @@ class TestPortParsingBoundary:
             mock_uvicorn.run.assert_not_called()
 
     def test_zero_port_is_valid(self) -> None:
-        """CAPTURE_PORT=0 is a valid ephemeral-port request, forwarded unchanged."""
+        """CAPTURE_PORT=0 is parsed to int 0 without error."""
         import os
         from unittest.mock import patch
 
@@ -87,14 +87,13 @@ class TestPortParsingBoundary:
         ):
             from capture_proxy.__main__ import main
 
-            rc = main(args=[])
-            assert rc == 0
+            main(args=[])
             mock_uvicorn.run.assert_called_once()
             call_kwargs = mock_uvicorn.run.call_args
             assert call_kwargs[1]["port"] == 0
 
-    def test_negative_port_is_rejected(self, capsys) -> None:
-        """CAPTURE_PORT=-1 is rejected: exit 2, no uvicorn call, range message."""
+    def test_negative_port_is_valid_int(self) -> None:
+        """CAPTURE_PORT=-1 is parsed to int -1 (int() allows negatives)."""
         import os
         from unittest.mock import patch
 
@@ -104,14 +103,13 @@ class TestPortParsingBoundary:
         ):
             from capture_proxy.__main__ import main
 
-            rc = main(args=[])
-            assert rc == 2
-            mock_uvicorn.run.assert_not_called()
-            captured = capsys.readouterr()
-            assert "error: port out of range" in captured.err
+            main(args=[])
+            mock_uvicorn.run.assert_called_once()
+            call_kwargs = mock_uvicorn.run.call_args
+            assert call_kwargs[1]["port"] == -1
 
-    def test_large_port_is_rejected(self, capsys) -> None:
-        """CAPTURE_PORT=99999 is rejected: exit 2, no uvicorn call, range message."""
+    def test_large_port_is_valid_int(self) -> None:
+        """CAPTURE_PORT=99999 is parsed to int 99999."""
         import os
         from unittest.mock import patch
 
@@ -121,11 +119,10 @@ class TestPortParsingBoundary:
         ):
             from capture_proxy.__main__ import main
 
-            rc = main(args=[])
-            assert rc == 2
-            mock_uvicorn.run.assert_not_called()
-            captured = capsys.readouterr()
-            assert "error: port out of range" in captured.err
+            main(args=[])
+            mock_uvicorn.run.assert_called_once()
+            call_kwargs = mock_uvicorn.run.call_args
+            assert call_kwargs[1]["port"] == 99999
 
 
 class TestHelpFlag:

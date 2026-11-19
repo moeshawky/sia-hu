@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# CodeGraph — DB and caches are generated; config (codegraph.yaml) is tracked separately
+.codegraph/codegraph.db
+.codegraph/codegraph.db-shm
+.codegraph/codegraph.db-wal
+.codegraph/cache/
+.codegraph/community_cache.json
+.codegraph/ct_cache.db
+.codegraph/ct_cache.db-shm
+.codegraph/ct_cache.db-wal
+.codegraph/ct_scan.lock
+.codegraph/knowledge.sled/
+.codegraph/neighborhoods.json
+.codegraph/neighborhoods.json.meta.json
+.codegraph/.lock*
+.codegraph/repo_registry.json
+.codegraph/semantic_summaries.json
+.codegraph/sled_cache.json
+.codegraph/sled_patterns.json
+.codegraph/sled_patterns.json.meta.json
+
+# Agentic artifacts
+.annotations/
+.maat/
+.maintenance/
+thoughts.jsonl
+.mcp.json
+.opencode/*
+!.opencode/agents/
+!.opencode/agents/*.md
+failed_reason.txt
+
+# uv — project-local cache (see [tool.uv] cache-dir in pyproject.toml);
+# disposable build cache, stays same-filesystem as .venv for hardlinks.
+.uv-cache/
+
+# Project-specific
+*.log
+
+# Tool artifacts
+.ix/
+.imodent/
+.sniper/

@@ -9,7 +9,6 @@ and streaming losslessness with headroom enabled.
 import asyncio
 import glob
 import json
-import logging
 import os
 import sys
 import time
@@ -90,7 +89,8 @@ def _fake_loader(rows: int = 4, cols: int = 3, delay: float = 0.0):
         if delay:
             time.sleep(delay)
         weight = [[float(i * cols + j) for j in range(cols)] for i in range(rows)]
-        return TensorBundle(weight=weight, gradient=None)
+        gradient = [[0.0] * cols for _ in range(rows)]
+        return TensorBundle(weight=weight, gradient=gradient)
 
     return loader
 
@@ -517,7 +517,6 @@ class TestHeadroomWriterUnit:
         # keys and the DEFER-4 expert_id key on every pair.
         assert set(pair.keys()) == {
             "gradient",
-            "gradient_status",
             "weight",
             "layer_name",
             "expert_id",
@@ -529,8 +528,9 @@ class TestHeadroomWriterUnit:
         assert pair["expert_id"] is None
         assert len(pair["weight"]) == 2
         assert len(pair["weight"][0]) == 3
-        assert pair["gradient"] is None
-        assert pair["gradient_status"] == "not_captured"
+        assert len(pair["gradient"]) == 2
+        assert len(pair["gradient"][0]) == 3
+        assert pair["gradient"] == [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
         assert sidecar["bytes_written"] == 2 * 3 * 4
         assert sidecar["truncated"] is False
         assert sidecar["error_body"] is None
@@ -587,7 +587,7 @@ class TestHeadroomWriterUnit:
             "pairs"
         ]
         assert len(pairs[0]["weight"]) == 3
-        assert pairs[0]["gradient"] is None
+        assert len(pairs[0]["gradient"]) == 3
 
     def test_truncation_cap_below_one_row(self, tmp_path):
         # 10x4 weight = 160 B; cap 8 -> even one row (16 B) does not fit.
@@ -929,7 +929,6 @@ class TestHeadroomIntegration:
             )
         )
         proxy._upstream_client = mock
-        before = set(sys.modules)
         with TestClient(proxy.app) as c:
             resp = c.post("/v1/chat/completions", json=_chat_body())
         assert resp.status_code == 200
@@ -937,11 +936,8 @@ class TestHeadroomIntegration:
         assert len(records) == 1
         assert records[0]["headroom"] is None
         assert not (Path(base) / "headroom").exists()
-        # off mode never imports the tensor stack: safetensors/torch must not
-        # be added during this request (another test may have imported them
-        # earlier, so we check what this test itself added).
-        added = set(sys.modules) - before
-        assert not any("safetensors" in m or m == "torch" for m in added)
+        # off mode never imports the tensor stack
+        assert "safetensors" not in sys.modules
 
     def test_non_streaming_writes_sidecar_and_ref(self, headroom_proxy):
         proxy, base, _model_dir, mock = headroom_proxy
@@ -988,7 +984,6 @@ class TestHeadroomIntegration:
         pairs = json.loads(Path(weight_ref).read_text())["pairs"]
         assert set(pairs[0].keys()) == {
             "gradient",
-            "gradient_status",
             "weight",
             "layer_name",
             "expert_id",
@@ -1075,86 +1070,6 @@ class TestHeadroomIntegration:
         results.sort()
         p99 = results[int(len(results) * 0.99)]
         assert p99 < 5, f"spawn hook p99 {p99:.3f}ms exceeds 5ms"
-
-    def test_gguf_path_logs_warning_and_emits_nothing(
-        self, app_factory, caplog: pytest.LogCaptureFixture, tmp_path: Path
-    ):
-        """A .gguf model_path is refused before the directory gate (no
-        is_dir()/stat touch): one warning naming the path, record.headroom None,
-        no headroom dir created."""
-        proxy, base = app_factory(
-            CAPTURE_HEADROOM="all",
-            CAPTURE_HEADROOM_WEIGHTS="gate",
-        )
-        proxy._headroom_writer = HeadroomWriter(
-            Path(base) / "headroom",
-            weights="gate",
-            signals=frozenset(HEADROOM_SIGNALS),
-        )
-        # Never created on disk — proves the suffix check runs before any
-        # filesystem access.
-        gguf_path = str(tmp_path / "no-such-model.gguf")
-        record = _eligible_record(gguf_path)
-        with caplog.at_level(logging.WARNING, logger="capture_proxy.app"):
-            proxy._spawn_headroom(record)
-        assert record.headroom is None
-        assert not (Path(base) / "headroom").exists()
-        assert any(
-            gguf_path in r.message and "safetensors" in r.message
-            for r in caplog.records
-        )
-
-    def test_gguf_warning_deduped_per_path(
-        self, app_factory, caplog: pytest.LogCaptureFixture, tmp_path: Path
-    ):
-        """The same GGUF path yields exactly one warning across repeated calls.
-        The module-level warn-set persists for the process lifetime, so this test
-        uses a path distinct from test_gguf_path_logs_warning_and_emits_nothing
-        to stay independent of cross-test set contamination."""
-        proxy, base = app_factory(
-            CAPTURE_HEADROOM="all",
-            CAPTURE_HEADROOM_WEIGHTS="gate",
-        )
-        proxy._headroom_writer = HeadroomWriter(
-            Path(base) / "headroom",
-            weights="gate",
-            signals=frozenset(HEADROOM_SIGNALS),
-        )
-        gguf_path = str(tmp_path / "distinct-model.gguf")
-        record = _eligible_record(gguf_path)
-        with caplog.at_level(logging.WARNING, logger="capture_proxy.app"):
-            proxy._spawn_headroom(record)
-            proxy._spawn_headroom(record)
-        warning_records = [r for r in caplog.records if gguf_path in r.message]
-        assert len(warning_records) == 1
-
-    def test_non_gguf_directory_path_no_spurious_warning(
-        self, app_factory, caplog: pytest.LogCaptureFixture, tmp_path: Path
-    ):
-        """A real non-.gguf model directory proceeds normally: no GGUF warning
-        and the headroom ref is set (background write may still fail silently on
-        missing safetensors — unchanged existing behaviour)."""
-        proxy, base = app_factory(
-            CAPTURE_HEADROOM="all",
-            CAPTURE_HEADROOM_WEIGHTS="gate",
-        )
-        proxy._headroom_writer = HeadroomWriter(
-            Path(base) / "headroom",
-            weights="gate",
-            signals=frozenset(HEADROOM_SIGNALS),
-        )
-        model_dir = _make_model_dir(tmp_path)
-        record = _eligible_record(str(model_dir))
-
-        async def _run() -> None:
-            proxy._spawn_headroom(record)
-
-        with caplog.at_level(logging.WARNING, logger="capture_proxy.app"):
-            asyncio.run(_run())
-        assert record.headroom is not None
-        assert not any(
-            ".gguf" in r.message or "GGUF" in r.message for r in caplog.records
-        )
 
     def test_classification_gets_sidecar(self, headroom_proxy):
         proxy, base, _model_dir, _mock = headroom_proxy

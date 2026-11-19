@@ -1,0 +1,14 @@
+# === SOURCE CODE ===
+src/capture_proxy/
+
+# === TESTS ===
+tests/
+
+# === CONFIG & DOCS ===
+pyproject.toml
+AGENTS.md
+README.md
+
+# === CodeGraph self-reference ===
+.codegraph/codegraph.yaml
+.codegraphinclude

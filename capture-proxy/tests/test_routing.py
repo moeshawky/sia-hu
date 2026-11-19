@@ -3,7 +3,7 @@
 Covers: base64-int32 decode contract parity with SGLang's
 extract_routed_experts_from_meta_info, non-48x10 tensor shapes (width and
 layer count are decoded, never hardcoded), extractor carrier precedence
-(sglext first, meta_info fallback),
+(sglext first per ticket 003 §6, meta_info fallback),
 fire-and-forget writer artifact contents, day-directory layout, and the
 default-off behavior: unset flag or absent routed_experts produce a raw
 capture whose field set is identical to the untouched behavior (zero new
@@ -28,6 +28,7 @@ from capture_proxy.routing import (
     extract_routed_experts_b64,
     parse_routing_shape,
 )
+from capture_proxy.upstream import StreamingUpstreamResponse
 
 
 def _b64_int32(values):
@@ -103,7 +104,7 @@ def test_extractor_absent_paths():
 
 
 def test_extractor_finds_sglext_carrier():
-    """sglext.routed_experts is the proven carrier."""
+    """sglext.routed_experts is the proven carrier (ticket 003 §6)."""
     raw = _b64_int32([7])
     assert extract_routed_experts_b64({"sglext": {"routed_experts": raw}}) == raw
 
@@ -393,6 +394,117 @@ def test_raw_capture_field_set_unchanged(tmp_path):
     on_recs = _read_raw(tmp_path / "on")
     assert len(off_recs) == len(on_recs) == 1
     assert set(off_recs[0]) == set(on_recs[0])
+
+
+# ---- injection tests (ticket 005: proxy injects return_routed_experts upstream) ----
+
+
+def _make_streaming_response(
+    status_code: int,
+    chunks: list[bytes],
+    content_type: str = "text/event-stream",
+) -> StreamingUpstreamResponse:
+    """Build a StreamingUpstreamResponse from raw byte chunks."""
+
+    async def _aiter():
+        for chunk in chunks:
+            yield chunk
+
+    return StreamingUpstreamResponse(
+        status_code=status_code,
+        headers={"content-type": content_type},
+        content_type=content_type,
+        stream=_aiter(),
+    )
+
+
+def test_injection_adds_flag_when_armed(tmp_path):
+    """Armed sidecar injects return_routed_experts=true into the upstream body."""
+    client, mock, proxy = _make_client(
+        tmp_path,
+        {
+            "CAPTURE_ROUTED_EXPERTS": "on",
+            "CAPTURE_ROUTED_EXPERTS_SHAPE": "4x3",
+        },
+    )
+    assert proxy._routed_experts_writer is not None
+    mock.proxy.return_value = _completion_response(with_routing=True)
+    client.post(
+        "/v1/completions",
+        json={"model": "m", "prompt": "hi", "max_tokens": 2},
+    )
+    upstream_body = mock.proxy.call_args.kwargs["body"]
+    assert upstream_body["return_routed_experts"] is True
+
+
+def test_no_injection_when_writer_none(tmp_path):
+    """Sidecar off: no flag injected into the upstream body."""
+    client, mock, proxy = _make_client(tmp_path, {})
+    assert proxy._routed_experts_writer is None
+    mock.proxy.return_value = _completion_response(with_routing=True)
+    client.post(
+        "/v1/completions",
+        json={"model": "m", "prompt": "hi", "max_tokens": 2},
+    )
+    upstream_body = mock.proxy.call_args.kwargs["body"]
+    assert "return_routed_experts" not in upstream_body
+
+
+@pytest.mark.parametrize(
+    "endpoint,payload",
+    [
+        ("/v1/embeddings", {"model": "m", "input": "hello"}),
+        ("/v1/rerank", {"model": "m", "query": "q", "documents": ["d"]}),
+        ("/v1/classification", {"model": "m", "inputs": ["hello"]}),
+    ],
+)
+def test_no_injection_for_non_chat_completion(tmp_path, endpoint, payload):
+    """Embeddings/rerank/classification routes are never injected even when armed."""
+    client, mock, proxy = _make_client(
+        tmp_path,
+        {
+            "CAPTURE_ROUTED_EXPERTS": "on",
+            "CAPTURE_ROUTED_EXPERTS_SHAPE": "4x3",
+        },
+    )
+    assert proxy._routed_experts_writer is not None
+    mock.proxy.return_value = MagicMock(
+        status_code=200, body={}, headers={"content-type": "application/json"}
+    )
+    client.post(endpoint, json=payload)
+    upstream_body = mock.proxy.call_args.kwargs["body"]
+    assert "return_routed_experts" not in upstream_body
+
+
+def test_streaming_response_unchanged_when_injected(tmp_path):
+    """Streaming client-visible response is byte-identical when flag is injected."""
+    client, mock, proxy = _make_client(
+        tmp_path,
+        {
+            "CAPTURE_ROUTED_EXPERTS": "on",
+            "CAPTURE_ROUTED_EXPERTS_SHAPE": "4x3",
+        },
+    )
+    assert proxy._routed_experts_writer is not None
+    chunks = [
+        b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n',
+        b"data: [DONE]\n\n",
+    ]
+    mock.proxy.return_value = _make_streaming_response(200, chunks)
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "m",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    )
+    # Upstream body has the flag injected
+    upstream_body = mock.proxy.call_args.kwargs["body"]
+    assert upstream_body["return_routed_experts"] is True
+    # Client-visible response is unchanged byte-wise
+    assert resp.status_code == 200
+    assert resp.content == b"".join(chunks)
 
 
 def _read_raw(base):

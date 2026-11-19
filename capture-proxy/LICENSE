@@ -1,0 +1,55 @@
+PROVISIONAL LICENSE — NOT A FINAL GRANT, NOT AN OPEN-SOURCE LICENSE
+===================================================================
+
+This file is a placeholder. It is deliberately NOT a license that grants
+anything. It exists so the package can be built and moved while three
+decisions are still open. Do not treat any use of this software as licensed.
+
+STATUS: DRAFT — three blocking decisions unresolved as of 2026-10-17.
+
+1. LICENSOR / COPYRIGHT HOLDER — UNDETERMINED
+   The holder of copyright and licensing authority for this software has not
+   been identified. A placeholder line naming "contributors" is not a licensor:
+   it names no legal entity, no person, and no one capable of granting,
+   enforcing, or later amending terms. Until a holder is named, there is no
+   party who could grant a license under this file.
+
+2. PACKAGE IDENTITY — UNDETERMINED
+   The published distribution name has not been chosen. The working name used
+   during development is "capture-proxy", but a unified name covering both the
+   carrier and the scoring authority is under consideration. Distribution
+   names on PyPI are permanent and cannot be renamed or reused once claimed.
+
+3. COMMERCIAL TERMS — UNDETERMINED
+   The intent is a shareware arrangement in which use is free for individuals
+   and smaller organisations and a paid grant is required above a stated
+   threshold. That threshold, its metric (revenue, headcount, or both), and
+   the treatment of use as a dependency in automated builds are all undecided.
+
+WHAT THIS FILE DOES NOT DO
+--------------------------
+It does not grant permission to use, copy, modify, or distribute this
+software. It does not place this software in the public domain. It does not
+grant any patent rights. It does not obligate anyone to comply with any
+condition.
+
+Until it is replaced by a completed license naming a licensor, the default
+position is that no permission has been granted.
+
+REPLACEMENT CONDITIONS
+---------------------
+Replace this file when all three items above are settled. At that point:
+
+  - state the licensor explicitly
+  - state the commercial threshold and its metric
+  - state whether distribution, modification, and use as a dependency are
+    permitted without charge below that threshold
+  - state the term, if any, under which the terms change
+
+VERIFICATION
+------------
+To confirm this file is still the provisional one:
+
+    head -1 LICENSE
+
+It must print: PROVISIONAL LICENSE -- NOT A FINAL GRANT, NOT AN OPEN-SOURCE LICENSE
