@@ -231,7 +231,7 @@ as recorded there). Current status is updated below.
 | **A-2** | Provenance defaults were optimistic | RESOLVED in code (defaults `unavailable`; GGUF/safetensors sampled path reports `fixture`/`unverified`; weight-pairs `measured`/`verified` only when explicitly declared) | **RESOLVED — standing.** No optimistic defaults exist at HEAD |
 | **A-3** | `effective_rank` accepted from a single truncated tensor and scored it as a model-level property | REQUIRED (the artifact is honest about being a tile — 4096×4096 of a 12288×4096 parent, coverage 0.3333 — but the composite gave it no penalty or gate) | **STILL OPEN at the composite level.** The tile machinery (`parent_shape`, `coverage`, `sampling_mode`, `PARTIAL TILE` printing) is IMPLEMENTED; the *gate* — the composite must not present a one-tensor top-left tile as the model's rank — is part of Phase 6 (full-matrix + stratification) and Phase 13 (coverage-declared headline). The tensor was also an MLP gate, not the attention projection the weight plan intended (carrier defect C-3) |
 | **A-4** | Dense scoring contract unresolved against the operator's rule | DECISION BLOCKED (operator ruling required before any dense score is compared to a MoE score; arithmetic in SEAMS.md: Option A 0.80, Option B 0.90, B-variant 1.00) | **RESOLVED by operator ruling (2026-11-15):** a dense FFN *is* conceptually a one-expert MoE — **honor the unification at the expert-abstraction level, do NOT invent a normalization value to force numeric comparability, declare the comparability limit instead.** Implemented treatment: `single_expert` status with `balance_ratio=None` (excluded from numerator and denominator, as at HEAD) + an explicit comparability statement in the report (Phase 18). The explicit math — `log(1) = 0` is well-defined, the degenerate distribution is real, `None` is the honest value — is in `measurement-ontology.md` § 4 |
-| **A-5** | Refusal-direction extraction cannot run against a served vLLM | UNVERIFIED AT SCALE (all three acquisition paths fail against live vLLM 0.32.0: no `output_hidden_states` in `SamplingParams`; the SGLang route needs `--enable-return-hidden-states`; the live `--model-path` route needs the GPU/RAM the server holds; `--weight-deltas` needs an already-abliterated checkpoint. A behavioural probe ran instead: 100% refusal on AdvBench n=100, 0% on `harmless_alpaca` n=100, 2/30 on constructed borderline) | **STILL OPEN.** Direction extraction on a production server remains **UNKNOWN**; the SGLang route is now the designated path (Phase 19) |
+| **A-5** | Refusal-direction extraction cannot run against a served vLLM | UNVERIFIED AT SCALE (all three acquisition paths fail against live vLLM 0.32.0: no `output_hidden_states` in `SamplingParams`; the SGLang route needs `--enable-return-hidden-states`; the live `--model-path` route needs the GPU/RAM the server holds; `--weight-deltas` needs an already-abliterated checkpoint. A behavioural probe ran instead: 100% refusal on AdvBench n=100, 0% on `harmless_alpaca` n=100, 2/30 on constructed borderline) | **SGLang route EXECUTED 2026-11-19** (in `/root/.venvs/inference`, env-qualified — sglang 0.5.2, T4; `capture_residuals_sglang` via `/generate`+boolean, cohen_d=3.83); vLLM production-server route still **UNKNOWN**; in-process domain contrast executed (cohen_d=4.97). Production/174G extraction remains UNKNOWN (`docs/guides/runtime-refusal-ablation.md`, commit 160aca4) |
 
 **Unresolved contradictions carried forward** (each now has a home):
 
@@ -358,7 +358,9 @@ ornith-1.5-9b (32 hooks, shapes verified), D-6 per-channel defect; **vLLM —
 PROPOSED (nothing executed; serving engines expose no gradients, no
 routed_experts, no hidden states)**; **SGLang — PROPOSED (the only engine
 exposing `routed_experts` and hidden-state residuals; hard constraints per
-`guides/engine-selection.md`)**; **llama.cpp — PROPOSED (exposes none of the
+`guides/engine-selection.md`; refusal residual capture IMPLEMENTED + executed
+2026-11-19 in `/root/.venvs/inference` (sglang 0.5.2); R-05/R-06 consumption
+PROPOSED)**; **llama.cpp — PROPOSED (exposes none of the
 measurement signals)**; published artifacts (Hub) — PROPOSED, route real (§ 9.4);
 Hu capture replay — IMPLEMENTED for the weight-pair path (2-D guard at
 `models/loader.py:432-443` rejects 3-D fused stacks rather than slicing).
@@ -660,13 +662,13 @@ loader is not a verified model" (`guides/support-matrix.md`).
 | GGUF ternary (operator work) | ternary quants/sampling | **IMPLEMENTED** | `ternary_quants.py`/`ternary_sampling.py`; stock llama.cpp 11395 cannot read the Ternary-Bonsai GGUF (serving-side, separate path); Prism fallback gap recorded (§ 9.7) |
 | Encoder/classifier (BERT family) | safetensors direct | **IMPLEMENTED** (Phase 5) | BERT/ModernBERT/laya/RockAndEgg naming; **DeBERTa P6 UNKNOWN** — implemented, never verified on a real model |
 | Multimodal (vision + mtp) | in-process forward | **VERIFIED (one model)** | ornith-1.5-9b tower handled (`"visual"` substring, GAP-3); sampling covers MLP projections only |
-| qwen3-0.6b / mimo-v2.6 refusal direction | in-process forward | **VERIFIED (small models)** | Phase 11: synthetic-axis recovery to the analytic noise floor; in-process tiny `LlamaModel` only — **no 174G checkpoint loaded, no production-scale extraction: UNKNOWN at model scale (A-5)** |
+| qwen3-0.6b / mimo-v2.6 refusal direction | in-process forward | **VERIFIED (small models)** | Phase 11: synthetic-axis recovery to the analytic noise floor; in-process tiny `LlamaModel` only — **no 174G checkpoint loaded** (production-scale extraction still UNKNOWN, A-5); model-scale in-process extraction VALIDATED 2026-11-19 (qwen3-0.6b cohen_d=4.97; Qwen2.5-Coder-1.5B-Instruct 4/4 refuse + ablation 4/4→0/4), TIER A — see `docs/guides/runtime-refusal-ablation.md` header, commit 160aca4 |
 
 ### 16.2 Serving-engine routes (authority consumption)
 
 | Engine | Capability needed | Status |
 |--------|-------------------|--------|
-| SGLang | `routed_experts` (R-06), hidden-state residuals (R-05/refusal A-5) | **PROPOSED** — hard-constraint engine; carrier emission VERIFIED 2026-10-09 (carrier's, not the authority's); nothing executed authority-side; sglang not on this machine's PATH |
+| SGLang | `routed_experts` (R-06), hidden-state residuals (R-05/refusal A-5) | **PROPOSED** — hard-constraint engine; carrier emission VERIFIED 2026-10-09 (carrier's, not the authority's); R-06 carrier-artifact consumption UNEXECUTED; REFUSAL residual capture EXECUTED authority-side 2026-11-19 in `/root/.venvs/inference` (sglang 0.5.2; cohen_d=3.83); sglang absent from default env/PATH (default env unchanged) — `docs/guides/runtime-refusal-ablation.md`, commit 160aca4 |
 | vLLM | none of the measurement signals | **PROPOSED** for any future consumption; vLLM 0.32.0 present in a local venv (environment fact, 2026-11-10) |
 | llama.cpp | none of the measurement signals | **PROPOSED**; engine running (build 11395, 2026-11-10); cannot read the ternary GGUF (serving-side limitation) |
 | ollama | none of the measurement signals | **PROPOSED**; not on PATH |
@@ -793,7 +795,10 @@ from the repo root, 0 failures, on the declaring branch.
 ### Phase 19 — SGLang authority-side integration (R-05/R-06 activity route)
 
 - **Status:** PROPOSED (environment-gated: SGLang must be installed and served
-  with the two flags; not present on this machine at measurement time).
+  with the two flags; absent from the default repo env/PATH at measurement
+  time — present in `/root/.venvs/inference` 2026-11-19, served with
+  `--enable-return-hidden-states`, executed for refusal residuals; the R-06
+  routing-histogram exit criterion remains unmet, so PROPOSED stands).
 - **Dependencies:** Phase 16 (per-channel recorder).
 - **Exit criteria:**
   1. Executed: SGLang served with `--enable-return-routed-experts` (and
@@ -854,7 +859,7 @@ from the repo root, 0 failures, on the declaring branch.
 | DeBERTa verification (P6 UNKNOWN) | No DeBERTa model on the machine | Model availability |
 | Calibration harness (Phase 20) | No realized intervention-with-outcome yet | First `InterventionRecord` with outcome |
 | `ModuleNotFoundError` fallback in `_gguf_dequantize` | No-`gguf` paths skip; measured 2026-11-06 (CI run 42260689947) | A no-`gguf` install that needs the Prism fallback |
-| Production-scale refusal-direction extraction (A-5) | All three paths fail against live vLLM 0.32.0; measured cause recorded | SGLang route live (Phase 19 environment) or an abliterated checkpoint for `--weight-deltas` |
+| Production-scale refusal-direction extraction (A-5) | All three paths fail against live vLLM 0.32.0; measured cause recorded | SGLang route live (Phase 19 environment) or an abliterated checkpoint for `--weight-deltas` — trigger FIRED at small-model scale 2026-11-19 (`/root/.venvs/inference`; `docs/guides/runtime-refusal-ablation.md`, commit 160aca4); the 174G / production-scale bar remains the gate |
 
 ---
 
@@ -991,7 +996,7 @@ preserved.
 - **Explicitly NOT a signal**: does not appear in `signals/`, is never imported by `analysis/orchestrator.py` or `analysis/scoring.py`, and does not contribute to the composite score. Enforced by `tests/test_refusal_cli.py::TestIsolation`
 - **Three acquisition paths**: offline JSON activations; live transformers forward hook; recovery from abliterated weight deltas (top right singular vector of `W r rᵀ`)
 - **Scope-defence amendment**: Phase 11 amends the Phase 6-10 scope-creep line below. It adds a standalone capability, not a signal category, so it does not reopen the fixed R-01…R-07 set
-- **Unverified at model scale**: the live hook is verified only against an in-process tiny `LlamaModel`. No 174G checkpoint was loaded and no refusal-rate or KL measurement was made, so end-to-end extraction quality on a production model remains UNKNOWN
+- **Unverified at production scale**: the live hook is verified against in-process models (tiny `LlamaModel`; Qwen2.5-Coder-1.5B-Instruct — refusal RATE now measured 2026-11-19: chat-templated depth gradient cohen_d 1.63→9.76, causal ablation 4/4→0/4 refuse). No 174G checkpoint was loaded and no KL measurement was made, so end-to-end extraction quality on a production model remains UNKNOWN (`docs/guides/runtime-refusal-ablation.md`, commit 160aca4)
 
 ### Known issues (preserved)
 

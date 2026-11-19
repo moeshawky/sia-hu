@@ -127,30 +127,53 @@ Use `--output-file` to write to a file instead of stdout. `python -m model_headr
 
 ## Refusal direction analysis
 
-Entry point `model-headroom-refusal` (`src/model_headroom/refusal/cli.py:48`).
+Entry point `model-headroom-refusal` (`refusal/cli.py:main`).
 
 Live capture: `--model-path` must be a HuggingFace directory containing
 `config.json`, or a Hub id. A file path — including a `.gguf` — is rejected
-before `AutoTokenizer` is constructed (`refusal/cli.py:_ModelPathError`,
-`_is_filesystem_shaped`, lines 44 and 218), exit 1, because transformers cannot
-load GGUF checkpoints (`refusal/cli.py:233-239`, `:253`). A directory without
-`config.json` is rejected (`refusal/cli.py:240-243`); a nonexistent
-filesystem-shaped path is rejected (`refusal/cli.py:244-245`); a Hub id is
-passed through for transformers to resolve.
+before `AutoTokenizer` is constructed (`refusal/cli.py:_ModelPathError` raised
+in `_load_live` / `_load_live_model`, filesystem-shape test
+`_is_filesystem_shaped`), exit 1, because transformers cannot load GGUF
+checkpoints. A directory without `config.json` is rejected; a nonexistent
+filesystem-shaped path is rejected; a Hub id is passed through for transformers
+to resolve.
+
+Live capture tokenizes raw prompt text; instruct/chat models must be
+pre-templated — pass `--chat-template` (wraps via
+`apply_chat_template(..., add_generation_prompt=True)`) or pre-template the
+prompt files — otherwise the direction is computed over un-templated text.
+
+On SGLang 0.5.2 the capture reads `meta_info.hidden_states[0][-1]` from
+`POST /generate` with boolean `return_hidden_states: true`; the
+`/v1/chat/completions` SSE path is fallback only (broken on 0.5.2:
+`bool_parsing` / `input_ids` batch bug).
+
+Domain contrast: the CLI computes `domain_direction = mean(in) - mean(out)` at
+the resolved layer from `--domain-activations`/`--out-of-domain-activations`
+or `--domain-prompts`/`--out-of-domain-prompts` (plus optional
+`--domain-label`, `--model-id`), captured live via `_capture_domain_sglang` /
+`_capture_domain_live`. Validated live 2026-11-19 on Tesla T4 in the separate
+`/root/.venvs/inference` venv (cohen_d=4.97). `--weight-deltas` is rejected
+with any domain flag.
 
 Alternatives named by the guard: `--harmful-activations`/`--harmless-activations`
 with pre-captured residuals, or `--sglang-url` with `--enable-return-hidden-states`
-(`refusal/cli.py:236-238`, `:388-414`).
+(both named in the `_ModelPathError` message raised by `_load_live` /
+`_load_live_model`).
 
 Prompt files are newline-delimited `.txt` (exactly one prompt per physical line),
 `.json`, or `.jsonl` (`refusal/activations.py:load_prompts`, lines 79-120).
 `scripts/fetch_refusal_prompts.py` builds both sets with the standard library
 only (AdvBench CSV + the HF datasets-server rows API).
 
+Output: `--output-format {text,json,safetensors,both}` (default `text`);
+`--output-file` is required for `safetensors`/`both`.
+
 ## Further Docs
 
 - `PROJECT-ROADMAP.md` — living plan, completed phases 1–4, evidence-gated phases 5–9.
 - `TEST_PROTOCOL.md` — adversarial test protocol, scope, success/failure criteria.
+- `docs/guides/runtime-refusal-ablation.md` — refusal-direction operator guide; the TIER-A live-execution evidence lives there.
 - Contributor constraints: frozen dataclasses, lint→typecheck→test order (see repo README).
 
 ## Project Structure
