@@ -9,7 +9,7 @@ contract-first design that implements it. Status: approved for implementation 20
 |----|-------------|-------------------------|
 | R-01 | Opt-in sidecar, off by default | `CAPTURE_HEADROOM=off`: 0 files under `headroom/`, 0 `torch`/`safetensors` imports, 0 bytes on hot path (sys.modules spy + dir listing test) |
 | R-02 | Emitted files consumable by `model_headroom` | `*weight_pairs.json` passes `loader.py:398` `load_weight_pairs_from_json` contract: every pair has `gradient`, `weight`, `layer_name` keys, 2-D float arrays, `gradient` same shape as `weight` |
-| R-03 | `CaptureRecord` additive bump 4→5 | `schema_version=5` default; `headroom: HeadroomRef \| None = None`; v4 records (no key) still validate; `model_dump()` of v5 line contains `headroom` |
+| R-03 | `CaptureRecord` additive bump to schema v6 | `schema_version=6` default (`CaptureRecord` at `src/capture_proxy/models.py:283`); `headroom: HeadroomRef \| None = None` (`models.py:318`); `HeadroomRef.schema_version=6` (`models.py:121`); `CapturedHeadroom.schema_version=7` (`models.py:168`); v5 records (no `headroom` key) still validate; `model_dump()` of v6 line contains `headroom` |
 | R-04 | Size control never OOMs | `CAPTURE_HEADROOM_MAX_BYTES` bounds float32 payload bytes (`rows*cols*4`); 256M cap on 5120×17408 gate → 3855-row truncation (3855×17408×4 = 268,431,360 B ≤ 268,435,456 B); `truncated=true` + `error_body` note; `max_bytes=0` unlimited |
 | R-05 | Sampling | `CAPTURE_HEADROOM_INTERVAL=N` → exactly 1 write per N eligible captures (counter test: 5 requests, N=2 → 2 or 3 writes bounded by floor/ceil 2±1; deterministic) |
 | R-06 | Post-response async, no critical-path await | `_spawn_headroom` wall time < 5 ms (p99 test on this box); `asyncio.create_task` fire-and-forget; streaming tee bytes unchanged (existing INV-3 lossless tests stay green) |
@@ -65,21 +65,24 @@ contract-first design that implements it. Status: approved for implementation 20
 
 ### `HeadroomRef` (models.py — written into `CaptureRecord.headroom`)
 ```
-schema_version: int = 5
+schema_version: int = 6
 capture_id: str                      # validator: must parse as UUID, else ValidationError
 parent_raw: Path                     # planned raw JSONL path (plan_path(), single-sourced)
 model: str                           # served model name from the request
 model_path: str                      # model dir from runtime_settings (must exist at spawn)
 architecture: Literal["dense","moe","unknown"] = "unknown"
+task: str | None = None              # additive in v6
 signals: dict[str, str | None]       # signal name -> artifact path or None (6 keys)
 ```
 Sidecar file schema = `CapturedHeadroom(HeadroomRef fields)` +
 `collected_at: str`, `bytes_written: int = 0`, `bytes_cap: int = 0`,
-`truncated: bool = False`, `error_body: str | None = None`.
+`truncated: bool = False`, `error_body: str | None = None`. `CapturedHeadroom.schema_version=7`.
 
-> **Superseded (2026-09-26):** `schema_version` is now `6` and both `HeadroomRef`
-> and `CapturedHeadroom` carry an additive `task: str | None = None`. The bump was
-> additive — v5 lines without the `task` key still validate.
+> **Superseded (2026-09-26):** `HeadroomRef.schema_version` is now `6` and both
+> `HeadroomRef` and `CapturedHeadroom` carry an additive `task: str | None = None`.
+> `CapturedHeadroom.schema_version` is `7` (bumped when per-pair `parent_shape`,
+> `truncated`, `sampling_mode` provenance was added). The bumps were additive —
+> v5 lines without the `task` key still validate.
 
 ### `HeadroomWriter` (headroom.py — new module)
 ```
@@ -112,8 +115,9 @@ write_json(path: Path, payload: dict[str, Any], *, compact: bool = False) -> Pat
 
 ### app.py seam
 `_spawn_headroom(record) -> HeadroomRef | None` — eligibility: writer enabled,
-`request_type in {chat, completion}`, valid-UUID `capture_id`, `upstream_status < 400`,
-`error_body is None`, `runtime_settings.model_path` is an existing dir, `should_sample()`.
+`request_type in {chat, completion, classification, image}`, valid-UUID `capture_id`,
+`upstream_status < 400`, `error_body is None`, `runtime_settings.model_path` is an
+existing dir (not a `.gguf` suffix), `should_sample()`.
 Sets `record.headroom`, spawns task. Called from `_handle_non_streaming` (before return)
 and `stream_generator` `finally` (after `_log_capture`). `_log_capture` now returns
 `Path | None` (raw/errors JSONL path; `None` on OSError). `CaptureLogger.plan_path()`
@@ -161,8 +165,13 @@ extracts the existing `{timestamp}-{turn_id}.jsonl` naming so ref and writer agr
 
 - No `torch`/`safetensors` in `pyproject.toml` (900 MB+ for a feature that is off by
   default; lazy import + documented env for verification).
-- No `dead_neurons`/`load_balance`/`specialization`/`loss`/`isoflop` file emission
-  (needs vLLM forward hooks or a training pipe — proposal §4.4 marks these future).
+- No `dead_neurons`/`loss_saturation`/`growth_factor` file emission
+  (needs vLLM forward hooks or a training pipe — proposal §4.4 marks these future;
+  they stay `null` in the sidecar). `load_balance` (activation artifact,
+  `headroom.py:1420-1425`) and `specialization` (expert-weights artifact,
+  `headroom.py:1406-1418`) ARE emitted when their signal is enabled and the
+  tensors resolve; `dead_neurons`, `loss_saturation` (CLI `loss`) and
+  `growth_factor` (CLI `isoflop`) have no producer and remain `null`.
 - No pending-task drain at shutdown (no drain machinery exists in the codebase;
   capture-tool process-exit semantics acceptable).
 - No GGUF support: `capture-proxy` is safetensors-only and never imports a GGUF

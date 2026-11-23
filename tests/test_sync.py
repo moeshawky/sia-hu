@@ -6,8 +6,10 @@ Never touches ~/.config, /root/captures, or /etc/machine-id.
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import os
+import signal
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -637,3 +639,143 @@ def test_sync_cli_overrides_env(
         line.split(" ") for line in stub_rclone.read_text().splitlines() if line.strip()
     ]
     assert "gdrive:cli-remote/box-1" in invocations[-1][3]
+
+
+def test_run_sync_once_rclone_oserror_returns_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """subprocess.run raising OSError -> run_sync_once returns 1 and logs
+    'rclone subprocess OSError' to stderr (sync.py:271-293)."""
+    from capture_proxy import sync as sync_mod
+
+    source = tmp_path / "source"
+    source.mkdir()
+    settings = {
+        "sync_remote": "gdrive:captures",
+        "sync_cmd": "copy",
+        "sync_min_age": "0",
+        "sync_interval": "1",
+        "sync_dry_run": False,
+        "sync_rclone_opts": "",
+        "sync_rclone_binary": "rclone",
+        "sync_pid_file": str(tmp_path / "sync.pid"),
+        "sync_log_file": str(tmp_path / "sync.log"),
+        "sync_instance_id": "box-1",
+        "sync_instance_id_explicit": True,
+        "sync_base_path": str(source),
+        "sync_config_path": str(tmp_path / "config.toml"),
+    }
+
+    with mock.patch.object(
+        sync_mod.subprocess, "run", side_effect=OSError(2, "missing")
+    ):
+        rc = sync_mod.run_sync_once(settings)
+
+    assert rc == 1
+    assert "rclone subprocess OSError" in capsys.readouterr().err
+
+
+def test_sync_daemon_lock_contention_returns_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Held flock on the pid file -> sync_daemon_loop returns 1 with 'start
+    in progress' on stderr (sync.py:318-365)."""
+    from capture_proxy import sync as sync_mod
+
+    pid_file = tmp_path / "sync.pid"
+    pid_file.write_text("")  # empty: no live pid
+    lock_fd = os.open(str(pid_file), os.O_RDWR)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        settings = {
+            "sync_remote": "gdrive:captures",
+            "sync_cmd": "copy",
+            "sync_min_age": "0",
+            "sync_interval": "1",
+            "sync_dry_run": False,
+            "sync_rclone_opts": "",
+            "sync_rclone_binary": "rclone",
+            "sync_pid_file": str(pid_file),
+            "sync_log_file": str(tmp_path / "sync.log"),
+            "sync_instance_id": "box-1",
+            "sync_instance_id_explicit": True,
+            "sync_base_path": str(tmp_path / "source"),
+            "sync_config_path": str(tmp_path / "config.toml"),
+        }
+        rc = sync_mod.sync_daemon_loop(settings)
+    finally:
+        with contextlib.suppress(OSError):
+            os.close(lock_fd)
+
+    assert rc == 1
+    assert "sync daemon start in progress" in capsys.readouterr().err
+
+
+def test_run_loop_sigterm_removes_pid_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SIGTERM to the main thread during _run_loop removes sync.pid and exits
+    0; run_sync_once is called at least once (sync.py:453-515).
+
+    Runs _run_loop in the main thread (signal.signal is main-thread only) and
+    sends SIGTERM from a helper thread after both the pid file appears (which
+    guarantees the handler is installed) and the first run_sync_once call is
+    recorded (the pid file is created before the loop body, so waiting on it
+    alone lets SIGTERM preempt the first call and makes last assertion flaky).
+    """
+    from capture_proxy import sync as sync_mod
+
+    source = tmp_path / "source"
+    source.mkdir()
+    pid_file = tmp_path / "sync.pid"
+
+    calls = []
+
+    def fake_run_sync_once(settings):
+        calls.append(settings)
+        return 0
+
+    monkeypatch.setattr(sync_mod, "run_sync_once", fake_run_sync_once)
+
+    settings = {
+        "sync_remote": "gdrive:captures",
+        "sync_cmd": "copy",
+        "sync_min_age": "0",
+        "sync_interval": "1",
+        "sync_dry_run": False,
+        "sync_rclone_opts": "",
+        "sync_rclone_binary": "rclone",
+        "sync_pid_file": str(pid_file),
+        "sync_log_file": str(tmp_path / "sync.log"),
+        "sync_instance_id": "box-1",
+        "sync_instance_id_explicit": True,
+        "sync_base_path": str(source),
+        "sync_config_path": str(tmp_path / "config.toml"),
+    }
+
+    signaled = threading.Event()
+
+    def send_sigterm() -> None:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if calls and pid_file.exists():
+                os.kill(os.getpid(), signal.SIGTERM)
+                signaled.set()
+                return
+            time.sleep(0.01)
+
+    t = threading.Thread(target=send_sigterm)
+    t.start()
+    try:
+        try:
+            sync_mod._run_loop(settings)
+        except SystemExit as exc:
+            assert exc.code == 0
+        else:
+            raise AssertionError("_run_loop did not exit via SystemExit")
+    finally:
+        t.join(timeout=5.0)
+
+    assert signaled.is_set(), "SIGTERM was never sent (pid file never appeared)"
+    assert not pid_file.exists(), "SIGTERM handler should have removed sync.pid"
+    assert len(calls) >= 1, "run_sync_once should have been called at least once"

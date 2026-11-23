@@ -12,6 +12,7 @@ from model_headroom.models.types import (
     GradientWeightPair,
     MLPActivations,
     SaturationReport,
+    WeightSample,
 )
 
 
@@ -123,3 +124,24 @@ class TestOrchestratorSpecializationAllFail:
             s for s in report.signals if s.signal_name == "specialization"
         )
         assert spec_signal.status == "error"
+
+
+class TestOrchestratorComparability:
+    def test_orchestrator_comparability_absent_when_no_parent_shape(self) -> None:
+        # Every weight sample has parent_shape=None -> coverages stays empty ->
+        # coverage_min None -> state "absent", measured_inflation_ratio None.
+        report = run_analysis(
+            model_name="test",
+            model_path="/tmp/test",
+            weight_samples=[
+                WeightSample(
+                    weight=torch.ones(4, 4),
+                    layer_name="l0",
+                    parent_shape=None,
+                    truncated=True,
+                ),
+            ],
+        )
+        comp = report.metadata["effective_rank_comparability"]
+        assert comp["state"] == "absent"
+        assert comp["measured_inflation_ratio"] is None

@@ -10,13 +10,9 @@ proposed here.
 
 ## Frozen dataclasses
 
-model_headroom defines **25 frozen dataclasses (27 including acquire/provenance.py)** (all in `models/types.py`), all
-immutable (`frozen=True`). They are the authority's type contracts — every
-input/output/error type flows through them.
+model_headroom defines **25 frozen dataclasses in `models/types.py` (27 including the 2 in `acquire/provenance.py`)** — measured 2026-11-23: `@dataclass` count = `frozen=True` count = 25 in `types.py` (`types.py:64-413`), plus `EvidenceProvenance` and `EvidenceBundle` in `acquire/provenance.py:44-83`. All immutable (`frozen=True`). They are the authority's type contracts — every input/output/error type flows through them.
 
-**Invariant:** Never mutate a frozen dataclass. Create new instances, never modify
-existing ones. `SignalError` is defined but never used — error handling uses string
-messages (documented known issue).
+**Invariant:** Never mutate a frozen dataclass. Create new instances, never modify existing ones. Error handling uses string messages (`error_message: str | None` on each result dataclass); there is no `SignalError` type anywhere in `src/` — measured 2026-11-23 (`grep -rn "SignalError" src/` returns no matches).
 
 **The `py.typed` marker is present** — the package declares itself typed for
 downstream consumers.
@@ -30,12 +26,12 @@ downstream consumers.
 | `HeadroomReport` | Top-level analysis result | composite score, per-signal results, recommendations |
 | `SignalResult` | Per-signal output | score, status, data, timing |
 | `GradientWeightPair` | Weight + gradient pair | weight, gradient, layer_name, parent_shape, truncated, sampling_mode |
-| `EffectiveRankResult` | R-03 output | rank, pct_of_full, coverage |
+| `EffectiveRankResult` | R-03 output | rank, percentage_of_full_rank, singular_values_count, coverage |
 | `LossDataPoint` | R-01 input | tokens_trained, validation_loss |
 | `IsoFLOPPoint` | R-02 input | compute_flops, model_params, measured_loss |
 | `ExpertActivationData` | R-05/R-06 input | layers: dict[str, dict[str, int]], metadata |
-| `HeadroomRef` | Carrier→authority ref | capture_id, parent_raw, model, model_path, architecture, signals, task |
-| `CapturedHeadroom` | Sidecar file schema | HeadroomRef fields + collected_at, bytes_written, truncated, error_body |
+| `HeadroomRef` | Carrier→authority ref (defined in `src/capture_proxy/models.py:93`, a Pydantic `BaseModel` — carrier-side, not an authority frozen dataclass) | capture_id, parent_raw, model, model_path, architecture, signals, task |
+| `CapturedHeadroom` | Sidecar file schema (defined in `src/capture_proxy/models.py:136`, a Pydantic `BaseModel` — carrier-side) | HeadroomRef fields + collected_at, bytes_written, truncated, error_body |
 
 ---
 

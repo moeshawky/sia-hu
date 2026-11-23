@@ -10,6 +10,9 @@ if TYPE_CHECKING:
 
 
 def _signal_to_dict(signal: Any) -> dict[str, Any]:
+    #: signal is Any because SignalResult is a protocol-like frozen dataclass
+    #: accessed generically via getattr; its concrete type varies per signal,
+    #: so a precise type here adds no safety. Justified by dynamic signal shape.
     result: dict[str, Any] = {
         "signal_name": signal.signal_name,
         "status": signal.status,

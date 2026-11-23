@@ -810,7 +810,18 @@ def main(args: list[str] | None = None) -> int:
     backend = _resolve_setting(
         parsed.backend, "CAPTURE_BACKEND", config, _DEFAULT_BACKEND
     )
-    port = int(_resolve_setting(parsed.port, "CAPTURE_PORT", config, _DEFAULT_PORT))
+    try:
+        port = int(_resolve_setting(parsed.port, "CAPTURE_PORT", config, _DEFAULT_PORT))
+    except (TypeError, ValueError):
+        raw = _resolve_setting(parsed.port, "CAPTURE_PORT", config, _DEFAULT_PORT)
+        print(
+            "error: invalid port\n"
+            f"  Cause:  CAPTURE_PORT={raw!r} is not a whole number\n"
+            "  Action: Pass a port between 0 and 65535\n"
+            "  Exit:   2",
+            file=sys.stderr,
+        )
+        return 2
     if not (0 <= port <= 65535):
         print(
             "error: port out of range\n"

@@ -8,7 +8,6 @@
 
 # === SOURCE CODE ===
 src/
-capture-proxy/
 model_headroom/
 scripts/
 tools/

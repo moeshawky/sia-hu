@@ -98,9 +98,53 @@ class RuntimeSnapshot:
 
     def _build_settings(self) -> dict[str, Any]:
         if self._backend == "vllm":
-            return self._build_vllm_settings()
-        if self._backend == "sglang":
-            return self._build_sglang_settings()
+            settings = self._build_vllm_settings()
+        elif self._backend == "sglang":
+            settings = self._build_sglang_settings()
+        else:
+            settings = self._build_llama_settings()
+        intervention = self._intervention_metadata()
+        if intervention is not None:
+            settings["intervention"] = intervention
+        return settings
+
+    @staticmethod
+    def _intervention_metadata() -> dict[str, Any] | None:
+        """Parse the declared upstream intervention record, if any.
+
+        The serving side declares an intervention (e.g. a refusal ablation:
+        ``{"type": "refusal_ablation", "artifact_sha256": ..., "lambda": 1.0,
+        "fold_mode": "mean", "capture_width": 10240, "stream_count": 4,
+        "hook_record_ref": ...}``) through ``SIA_REFUSAL_INTERVENTION_JSON``.
+        The proxy records it verbatim — never derives or validates it — so
+        capture rows stay distinguishable control vs. ablated from the corpus
+        alone.
+
+        Returns:
+            dict | None: Parsed record, or None when unset/blank/malformed.
+                Malformed JSON is logged once; the proxy never fails a
+                request over advisory provenance.
+        """
+        raw = os.environ.get("SIA_REFUSAL_INTERVENTION_JSON", "").strip()
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            _logger.warning(
+                "SIA_REFUSAL_INTERVENTION_JSON is not valid JSON; "
+                "captures will carry no intervention record"
+            )
+            return None
+        if not isinstance(parsed, dict):
+            _logger.warning(
+                "SIA_REFUSAL_INTERVENTION_JSON is not a JSON object; "
+                "captures will carry no intervention record"
+            )
+            return None
+        return parsed
+
+    def _build_llama_settings(self) -> dict[str, Any]:
         service_env = self._private_model_environment()
         process_args = self._running_llama_args()
         model_path = process_args.get("model_path") or service_env.get("MODEL_PATH", "")
@@ -611,9 +655,12 @@ class RuntimeSnapshot:
 
     @staticmethod
     def _build_run_id(settings: dict[str, Any]) -> str:
+        intervention = settings.get("intervention")
         if settings.get("backend") == "vllm":
             # Distinct identity shape so vLLM configs hash independently and
-            # existing llama.cpp run_ids stay stable.
+            # existing llama.cpp run_ids stay stable. The intervention record
+            # is part of the identity so control vs ablated arms hash to
+            # distinct run_ids; control (no intervention) is unchanged.
             identity = {
                 "backend": settings.get("backend"),
                 "model_path": settings.get("model_path"),
@@ -644,6 +691,8 @@ class RuntimeSnapshot:
                 "cache_ram": settings.get("cache_ram"),
                 "tools": settings.get("tools"),
             }
+        if intervention is not None:
+            identity["intervention"] = intervention
         digest = hashlib.sha256(
             json.dumps(identity, sort_keys=True).encode()
         ).hexdigest()

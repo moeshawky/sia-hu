@@ -225,3 +225,34 @@ def test_publish_push_failure(
     err = capsys.readouterr().err
     assert "push failed" in err
     assert not any(c[1:3] == ["rev-parse"] for c in fake_git.commands)
+
+
+def test_publish_push_failure_stderr_is_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_git: _Git, capsys
+) -> None:
+    # C-CAUSE-20: push-failure stderr must not leak embedded credentials.
+    fake_git.set("status", "--porcelain", rc=0, out="")
+    fake_git.set("symbolic-ref", "--short", "HEAD", rc=0, out="main")
+    fake_git.set(
+        "remote",
+        "get-url",
+        "origin",
+        rc=0,
+        out="http://host/moe/sia-hu.git",
+    )
+    fake_git.set(
+        "push",
+        "-u",
+        "origin",
+        "main",
+        rc=1,
+        err="remote rejected: http://moe:gtok-secret@host/moe/sia-hu.git",
+    )
+
+    rc = sia.publish.main([])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "push failed" in err
+    assert "://***@" in err
+    assert "gtok-secret" not in err

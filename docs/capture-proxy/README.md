@@ -2,7 +2,7 @@
 
 Capture proxy for llama.cpp, ollama, node-llama-cpp, vLLM, and SGLang — logs raw JSONL of all requests/responses before forwarding. Exposes an **OpenAI-compatible API** so any agent using OpenAI client libraries can route through it transparently.
 
-**Version:** 0.3.0 — **Last Verified:** 2026-09-26 UTC
+**Version:** 0.7.0b2 (`pyproject.toml:7`) — **Last Verified:** 2026-11-23 UTC
 
 ## Quick start
 
@@ -114,7 +114,7 @@ capture-proxy --stop        # SIGTERM + cleanup
 | `GET` | `/v1/users` | List known user ids (most recent first) | — |
 | `GET` | `/v1/users/{id}/captures` | All captures for one user id | — |
 
-**Source:** `src/capture_proxy/app.py:385-502` — all routes registered in `_register_routes()`
+**Source:** `src/capture_proxy/app.py:645-814` — all routes registered in `_register_routes()` (chat/completions/embeddings/rerank/classification/images at 689-719; sessions/users index routes at 780-814). The app also registers gpu-arm native passthrough routes (`/v1/systemone`, `/v1/classify`, `/v1/batch-classify`, `/v1/ner`, `/v1/batch-ner`, `/v1/timeseries`, `/v1/batch-timeseries`) at `app.py:724-778`, which the endpoint table below does not list.
 
 ### Session & user tracking
 
@@ -165,7 +165,7 @@ print(response.json()["results"])
 - Ollama backend → 501
 - Upstream unreachable → 502
 
-**Source:** `src/capture_proxy/app.py:985-1150` (`_handle_rerank_request`), `src/capture_proxy/models.py:383-405` (`RerankRequest` model)
+**Source:** `src/capture_proxy/app.py:1338-1508` (`_handle_rerank_request`), `src/capture_proxy/models.py:414-436` (`RerankRequest` model)
 
 ### Embeddings
 
@@ -207,7 +207,7 @@ Schema validation failures are written to `{base_path}/errors/`; the
 early-validation 422s (empty/blank fields) exit before a capture exists and are
 not logged as captures.
 
-**Source:** `src/capture_proxy/app.py:1153-1312` (`_handle_classification_request`), `src/capture_proxy/models.py:408-449` (`ClassificationRequest`, `ClassificationResponse`)
+**Source:** `src/capture_proxy/app.py:1510-1673` (`_handle_classification_request`), `src/capture_proxy/models.py:439-480` (`ClassificationRequest`, `ClassificationResponse`)
 
 ### Image generation
 
@@ -236,7 +236,7 @@ generated image. `b64_json` payloads are forwarded as received.
 - Upstream 4xx/5xx → propagated verbatim with its body
 - Upstream unreachable → 502
 
-**Source:** `src/capture_proxy/app.py:1315-1470` (`_handle_image_request`), `src/capture_proxy/models.py:452-498` (`ImageRequest`, `ImageResponse`)
+**Source:** `src/capture_proxy/app.py:1675-1834` (`_handle_image_request`), `src/capture_proxy/models.py:483-529` (`ImageRequest`, `ImageResponse`)
 
 ### Task labels
 
@@ -358,11 +358,11 @@ maps the model. Full gate list: `example-headroom.md` §2.
 
 ### Operational boundary (router vs proxy)
 
-Operational boundary: router lifecycle — demand-load model loads, `models_max` LRU evictions, VRAM pressure, and slots/queue depth — stays with the router log plus `GET /v1/models` status plus `nvidia-smi`; the proxy exposes only the routes registered in `src/capture_proxy/app.py:381-499` (`/health`, `/v1/models`, `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/rerank`, `/v1/classification`, `/v1/images/generations`, `/v1/sessions*`, `/v1/users*`) and provides no alerting and no live-tail endpoint; proxy-visible failures are JSONL rows in `{base}/raw/` vs `{base}/errors/` plus the proxied 502 status; additional router observability or alerting is a follow-up ticket, not this proxy.
+Operational boundary: router lifecycle — demand-load model loads, `models_max` LRU evictions, VRAM pressure, and slots/queue depth — stays with the router log plus `GET /v1/models` status plus `nvidia-smi`; the proxy exposes only the routes registered in `src/capture_proxy/app.py:645-814` (`/health`, `/v1/models`, `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/rerank`, `/v1/classification`, `/v1/images/generations`, `/v1/sessions*`, `/v1/users*`) plus the gpu-arm native passthrough routes (`/v1/systemone`, `/v1/classify`, `/v1/batch-classify`, `/v1/ner`, `/v1/batch-ner`, `/v1/timeseries`, `/v1/batch-timeseries` at `app.py:724-778`), and provides no alerting and no live-tail endpoint; proxy-visible failures are JSONL rows in `{base}/raw/` vs `{base}/errors/` plus the proxied 502 status; additional router observability or alerting is a follow-up ticket, not this proxy.
 
 ### Aggregates (jq over JSONL, no endpoint)
 
-Aggregates are answered by `jq`/`rg` over JSONL, not by a `/v1/stats` endpoint (no such route exists in `src/capture_proxy/app.py:381-499`); success rows live in `{base}/raw/YYYY-MM-DD/*.jsonl` and failure rows in `{base}/errors/YYYY-MM-DD/*.jsonl` (`src/capture_proxy/logger.py:102-141`); fields are `CaptureRecord.model`, `.latency_ms`, `.created_at`, `.upstream_status`, `.usage_normalized.{prompt_total,completion,context_total}` (`src/capture_proxy/models.py:41-51,262-285`); verify with `rg -n "_register_routes|/v1/stats" src/capture_proxy/app.py` and `rg -n "class CaptureRecord|latency_ms|usage_normalized|upstream_status" src/capture_proxy/models.py`; last verified 2026-10-02 UTC.
+Aggregates are answered by `jq`/`rg` over JSONL, not by a `/v1/stats` endpoint (no such route exists in `src/capture_proxy/app.py:645-814`); success rows live in `{base}/raw/YYYY-MM-DD/*.jsonl` and failure rows in `{base}/errors/YYYY-MM-DD/*.jsonl` (`src/capture_proxy/logger.py:106-145`); fields are `CaptureRecord.model`, `.latency_ms`, `.created_at`, `.upstream_status`, `.usage_normalized.{prompt_total,completion,context_total}` (`src/capture_proxy/models.py:41-51` for `UsageNormalized`; `CaptureRecord` fields at `models.py:283-320`, `usage_normalized` field at `models.py:305`); verify with `rg -n "_register_routes|/v1/stats" src/capture_proxy/app.py` and `rg -n "class CaptureRecord|latency_ms|usage_normalized|upstream_status" src/capture_proxy/models.py`.
 
 ```bash
 BASE=${CAPTURE_BASE_PATH:-/root/captures}
@@ -383,7 +383,7 @@ jq -r '[.created_at[0:16], (.usage_normalized.context_total // 0)] | @tsv' "$BAS
 | `CAPTURE_PORT` | `8000` | Proxy listen port |
 | `CAPTURE_HOST` | `0.0.0.0` | Bind address |
 | `CAPTURE_UPSTREAM_URL` | `http://127.0.0.1:11434` | Target backend |
-| `CAPTURE_BACKEND` | *(auto)* | Backend type: `auto`, `llamacpp`, `ollama`, `node-llama-cpp`, `vllm` |
+| `CAPTURE_BACKEND` | *(auto)* | Backend type: `auto`, `llamacpp`, `ollama`, `node-llama-cpp`, `vllm`, `sglang` |
 | `CAPTURE_MODEL_ALIASES` | `off` | Public→upstream model map as JSON, e.g. `{"qwen3.8-27b-fp8":"davidau-qwen3.8-27b-twin-turbo-fable"}` (TOML `model_aliases` table; proxy-restart-only) |
 | `CAPTURE_MODEL_TASKS` | `off` | Public-model-id → task-type map as JSON, e.g. `{"nomic-embed-text":"embedding"}` (TOML `model_tasks` table; keys match the public id exactly; read per request) |
 | `CAPTURE_BASE_PATH` | `/root/captures` | JSONL storage root |
@@ -411,7 +411,7 @@ src/capture_proxy/
   runtime.py     → captures per-backend process metadata (llama-server/vllm) for run manifests
   stream.py      → SSE parser and streaming log writer
   models.py      → Pydantic schemas (CaptureRecord, RerankRequest, ChatCompletion*, Embedding*, Classification*, Image*)
-tests/           → 710 tests, all upstream mocked
+tests/           → 42 test files across `capture-proxy/tests/` (35) and `tests/` (7); 719 test functions in `capture-proxy/tests/` (`test_*.py` excl. conftest; `def test_` incl. async, counted via `rg`), all upstream mocked
 ```
 
 ## Verification
@@ -419,8 +419,8 @@ tests/           → 710 tests, all upstream mocked
 ### Test suite
 
 ```bash
-uv run pytest                          # 475 tests, all pass
-uv run pytest tests/test_rerank.py     # 29 rerank-specific tests
+uv run pytest                          # all tests (counts not re-verified here; run `rg -c "def test_" capture-proxy/tests/` for a current count)
+uv run pytest capture-proxy/tests/test_rerank.py   # rerank-specific tests
 ```
 
 ### Lint and types
@@ -432,7 +432,7 @@ uv run ruff format . --check           # formatting clean
 
 ## Conventions
 
-- Python 3.14 runtime, ruff/mypy target 3.12
+- Python 3.13 runtime (`.python-version` at repo root = 3.13), ruff/mypy target 3.12
 - Line length 88, ruff with `E,W,F,I,UP,B,SIM,RUF,S,C4,RET,TC,FA` rules
 - mypy strict mode (requires manual install)
 - pytest `asyncio_mode = "auto"` — no manual markers

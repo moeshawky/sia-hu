@@ -61,8 +61,8 @@ class TestSmoke:
 class TestPortParsingBoundary:
     """Adversarial: __main__.py port parsing with invalid input."""
 
-    def test_invalid_port_env_var_raises_value_error(self) -> None:
-        """Non-numeric CAPTURE_PORT raises ValueError at startup."""
+    def test_invalid_port_env_var_exits_two(self) -> None:
+        """Non-numeric CAPTURE_PORT exits 2 with a corrective message (no traceback)."""
         import os
         from unittest.mock import patch
 
@@ -72,8 +72,8 @@ class TestPortParsingBoundary:
         ):
             from capture_proxy.__main__ import main
 
-            with pytest.raises(ValueError):
-                main(args=[])
+            rc = main(args=[])
+            assert rc == 2
             mock_uvicorn.run.assert_not_called()
 
     def test_zero_port_is_valid(self) -> None:

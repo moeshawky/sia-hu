@@ -1,8 +1,8 @@
 # Unified `sia` CLI
 
-**Purpose:** Document the `sia` CLI — a dispatch layer for the three existing
-CLIs (`capture-proxy`, `model-headroom`, `model-headroom-refusal`) plus two
-`sia`-owned verbs (`doctor`, `publish`). Cross-references
+**Purpose:** Document the `sia` CLI — a dispatch layer for the four existing
+CLIs (`capture-proxy`, `model-headroom`, `model-headroom-refusal`,
+`model-headroom-paired`) plus two `sia`-owned verbs (`doctor`, `publish`). Cross-references
 `architecture/sia-hu-identity.md` (the bridge role) and
 `reference/cli-flags.md` (all flags). Existing CLIs remain byte-for-byte
 unchanged; `sia` adds new subcommands without modifying them.
@@ -32,6 +32,7 @@ dispatcher. Exit codes propagate.
 | `sia capture-proxy` | `capture-proxy` | Carrier — emits Hu (capture artifacts) |
 | `sia model-headroom` | `model-headroom` | Authority — scores Sia (headroom analysis) |
 | `sia model-headroom-refusal` | `model-headroom-refusal` | Refusal analysis |
+| `sia model-headroom-paired` | `model-headroom-paired` | Paired-model recovery diagnostics |
 | `sia doctor` | `sia.doctor:main` | Read-only workspace preflight |
 | `sia publish` | `sia.publish:main` | Push current branch; verify remote ref never auto-commits |
 
@@ -60,13 +61,14 @@ scripts. `sia doctor`/`sia publish` are `sia`-owned only.
 ## Usage
 
 ```bash
-# List subcommands (now five)
+# List subcommands (now six)
 sia --help
 
 # Run a subcommand with its own flags
 sia capture-proxy --port 8001 --headroom all --headroom-weights gate
 sia model-headroom --model-name Emo_1b14b_1T --model-path /path/to/model
 sia model-headroom-refusal --model-name NAME --model-path PATH
+sia model-headroom-paired compare --reference baseline.json --candidate compressed.json
 
 # sia-owned verbs
 sia doctor

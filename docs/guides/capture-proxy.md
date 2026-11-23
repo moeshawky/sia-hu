@@ -15,7 +15,7 @@ Capture proxy for llama.cpp, ollama, node-llama-cpp, vLLM, and SGLang — logs r
 JSONL of all requests/responses before forwarding. Exposes an OpenAI-compatible API
 so any agent using OpenAI client libraries can route through it transparently.
 
-**Version:** 0.3.0 — the carrier half of sia-hu. Never scores; always emits.
+**Version:** 0.7.0b2 (`pyproject.toml:7`) — the carrier half of sia-hu. Never scores; always emits.
 
 ---
 
@@ -82,6 +82,12 @@ client = OpenAI(
 | GET | `/v1/sessions/{id}/captures` | Captures for one session | — |
 | GET | `/v1/users` | List user ids | — |
 | GET | `/v1/users/{id}/captures` | Captures for one user | — |
+
+The table above lists the OpenAI-compatible routes. The app also registers
+gpu-arm native passthrough routes (`/v1/systemone`, `/v1/classify`,
+`/v1/batch-classify`, `/v1/ner`, `/v1/batch-ner`, `/v1/timeseries`,
+`/v1/batch-timeseries` at `src/capture_proxy/app.py:724-778`) which are not
+in this table.
 
 ---
 
@@ -174,9 +180,12 @@ The sidecar is written post-response, async, never awaited on the response path
 is constructed — no files, no torch/safetensors import, nothing on the response
 path (R-01 purity).
 
-**Signal keys:** `effective_rank` is emitted by the MVP; `load_balance`,
-`dead_neurons`, `specialization`, `loss_saturation`, `growth_factor` remain reserved
-null until producers land.
+**Signal keys:** `effective_rank` (weight-pair artifact), `load_balance`
+(activation artifact), and `specialization` (expert-weights artifact, when
+`>=2` same-shape experts resolve) are emitted when their signal is enabled
+and the tensors resolve (`headroom.py:_write_sync` branches at `:1390-1425`);
+`dead_neurons`, `loss_saturation`, `growth_factor` remain reserved `null`
+until producers land.
 
 **Key env vars:**
 

@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from model_headroom.models import loader as _authority_loader
 
 from capture_proxy.headroom import (
     HeadroomWriter,
@@ -27,6 +26,7 @@ from capture_proxy.headroom import (
     _detect_architecture,
     _resolve_tensor_name,
 )
+from model_headroom.models import loader as _authority_loader
 
 SHARD = "model-00001-of-00002.safetensors"
 PROJS = ("gate", "up", "down")

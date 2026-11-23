@@ -11,7 +11,13 @@ proposed here.
 
 ## Source types
 
-Every data input to scoring carries a `source_type` that classifies its provenance:
+Every data input to scoring carries a `source_type` that classifies its provenance.
+The frozen `SourceType` literal has **ten** values (`models/types.py:14-25`):
+`measured, synthetic, fixture, estimated, imported, unknown, inferred, unavailable,
+invalid, not_applicable`. The loader accepts a **six-value** subset for external input
+(`models/loader.py:446-448`): the five below plus `unknown`. The internal literal is
+wider because signal code uses states like `unavailable`/`invalid`/`not_applicable` that
+are not valid external inputs.
 
 | Source type | Meaning | How inferred | Can be overridden |
 |-------------|---------|--------------|-------------------|
@@ -20,9 +26,13 @@ Every data input to scoring carries a `source_type` that classifies its provenan
 | `fixture` | Test fixture data | Inferred from file paths | `--weight-pairs-source-type fixture` |
 | `estimated` | Estimated/derived, not directly measured | Inferred from file paths | `--weight-pairs-source-type estimated` |
 | `imported` | Imported from another system | Inferred from file paths | `--weight-pairs-source-type imported` |
+| `unknown` | Provenance not determined | Default when a file's provenance cannot be inferred | `--weight-pairs-source-type unknown` |
 
 **Verification status** is orthogonal: it records whether the data has been
-independently verified against a real artifact.
+independently verified against a real artifact. The `VerificationStatus` literal has four
+values (`models/types.py:27-32`): `verified, provenance_incomplete, unverified,
+unavailable`; the loader's external acceptance set is three (`models/loader.py:449-451`):
+`verified, provenance_incomplete, unverified`.
 
 ---
 

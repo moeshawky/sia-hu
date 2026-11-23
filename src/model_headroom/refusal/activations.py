@@ -254,8 +254,17 @@ def capture_last_token_residuals(
 
 
 def _coerce_hidden_batch(raw: object, name: str) -> torch.Tensor | None:
-    """Normalise a server-returned hidden-state payload into a 2-D tensor."""
-    tensor = torch.tensor(raw, dtype=torch.float32)
+    """Normalise a server-returned hidden-state payload into a 2-D tensor.
+
+    A malformed (ragged, wrong-typed, or empty) payload is unrepresentable as a
+    tensor, so return None for that prompt rather than raising: the caller
+    (capture_residuals_sglang) continues with the remaining prompts instead of
+    aborting the whole multi-prompt capture.
+    """
+    try:
+        tensor = torch.tensor(raw, dtype=torch.float32)
+    except (ValueError, TypeError, RuntimeError):
+        return None
     if tensor.ndim == 1:
         tensor = tensor.unsqueeze(0)
     if tensor.ndim != 2 or tensor.shape[0] == 0 or tensor.shape[1] == 0:

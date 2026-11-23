@@ -24,5 +24,24 @@ jobs:
         run: uv run --with twine twine check dist/*
       - name: Inspect wheel contents
         run: uv run python -c "import glob, zipfile; whl = glob.glob('dist/*.whl')[0]; z = zipfile.ZipFile(whl); [print(name) for name in z.namelist()]"
+      - name: Inspect sdist contents (publication surface audit)
+        run: |
+          uv run python -c "
+import glob, tarfile
+tar = glob.glob('dist/*.tar.gz')
+assert len(tar) == 1, f'expected exactly one sdist, got {tar}'
+z = tarfile.open(tar[0])
+names = z.getnames()
+# Strip the sdist root component (e.g. sia_hu-0.6.0/) so the check is
+# path-prefix aware, not substring. This prevents false positives on
+# legitimate product docs under docs/capture-proxy/ (kept by design).
+root = names[0].split('/', 1)[0] if names else ''
+prefix = root + '/'
+rel = [n[len(prefix):] if n.startswith(prefix) else n for n in names]
+forbidden = ('capture-proxy/', 'docs/maintenance/', 'SESSION-', 'AGENTS.md', '.pi/', '.codegraph/')
+leaks = [n for n in rel if n.startswith(forbidden)]
+print('\\n'.join(sorted(names)))
+assert not leaks, f'sdist leaks non-public surface: {leaks}'
+"
       - name: Publish
         run: uv publish

@@ -13,14 +13,16 @@ The aliasing contract is unchanged: `sia <subcommand> <args>` forwards to the ma
 
 ## Current State (Verified from codebase survey)
 
-- **Single root project**: `sia-hu` 0.3.0, one `pyproject.toml`, one `uv.lock`, one ruff/mypy/pytest config at the repo root
-- **Three console scripts** already defined in `[project.scripts]`:
+- **Single root project**: `sia-hu` 0.7.0b2, one `pyproject.toml`, one `uv.lock`, one ruff/mypy/pytest config at the repo root
+- **Five console scripts** already defined in `[project.scripts]`:
   - `capture-proxy = "capture_proxy.__main__:main"`
   - `model-headroom = "model_headroom.cli:main"`
   - `model-headroom-refusal = "model_headroom.refusal.cli:main"`
+  - `model-headroom-paired = "model_headroom.paired.cli:main"`
+  - `sia = "sia.cli:main"`
 - **Each `main()`** returns an `int` and only calls `sys.exit()` inside its `if __name__ == "__main__"` guard — safe to import and call directly from a new dispatcher
 - **Packages live under `src/`**: `src/capture_proxy/`, `src/model_headroom/`, `src/sia/`
-- **The `sia` dispatcher exists** (Phase 1) and currently adds no verbs of its own
+- **The `sia` dispatcher exists** (Phase 1) and adds two native verbs of its own: `doctor` and `publish` (Phase 4 complete).
 - **Verify chain**: `ruff check . && ruff format --check . && mypy src/ && pytest` (run from repo root)
 
 ## Gap
@@ -30,7 +32,7 @@ Measured 2026-11-10 against `master-archive` (the branch that still holds the sc
 - `bootstrap-capture.sh` (115 lines): its config, daemon, status, and effective-config steps are native; its sync step is not.
 - `rclone-sync-captures.sh` (191 lines): **no native equivalent anywhere in `src/`**. `rg rclone` hits only `AGENTS.md`.
 - `bootstrap.sh` (330 lines): **no native equivalent**. Its unique load-bearing piece is push verification.
-- `sia` has **no tests**: `testpaths` covers only `capture-proxy/tests` and `model_headroom/tests`, and no test file references `sia`.
+- `sia` has tests under root `tests/` (`tests/test_sia_doctor.py`, `tests/test_sia_publish.py`, `tests/test_sync*.py`); `testpaths` (`pyproject.toml:97`) includes root `tests/` alongside `capture-proxy/tests` and `model_headroom/tests`.
 
 ## Planned Phases
 
@@ -43,13 +45,13 @@ Measured 2026-11-10 against `master-archive` (the branch that still holds the sc
 - **Goal**: Run the full verify chain and confirm both package test suites still pass
 - **Success criterion**: `ruff check . && ruff format --check . && mypy src/ && pytest` all exit 0; existing `capture-proxy`, `model-headroom`, `model-headroom-refusal` console scripts still work unchanged
 
-### Phase 3: Native `capture-proxy --sync` (AUTHORIZED — not started)
+### Phase 3: Native `capture-proxy --sync` (COMPLETE)
 - **Goal**: Replace `rclone-sync-captures.sh` with a native sync mode, so off-box capture sync is a property of the installed binary rather than of a shell file that no longer exists
 - **Success criterion**: one-shot sync and daemon loop both work against an rclone remote; re-running the daemon start is idempotent; a missing rclone produces an instructive error naming the flag, the expected value, and a valid example
 - **Constraints**: `copy` is the default; `sync` (destructive mirror) is refused unless the instance id is explicit; instance keying preserves `CAPTURE_MACHINE_ID` > hostname > `/etc/machine-id`; `--min-age` skips files still being written; sync never touches the response path; no new Python dependency
 - **Scope**: new `src/capture_proxy/sync.py`, `__main__.py` wiring, `_CONFIG_KEYS` additions, tests under `capture-proxy/tests/`
 
-### Phase 4: `sia doctor` + verified publish (AUTHORIZED — not started)
+### Phase 4: `sia doctor` + verified publish (COMPLETE)
 - **Goal**: Replace `bootstrap.sh` with native workspace verbs: a read-only preflight, and a publish that refuses to trust `git push` exit 0
 - **Success criterion**: `sia doctor` changes nothing and reports every failed check with the command that fixes it; `sia publish` pushes the current branch and fails loudly when the remote ref does not match local HEAD
 - **Constraints**: doctor is read-only; publish never auto-commits; a dirty tree is refused unless explicitly overridden; credential-bearing URLs are redacted in every message; `sia` keeps lazy imports so `sia --help` pulls no heavy dependency
@@ -63,7 +65,7 @@ Measured 2026-11-10 against `master-archive` (the branch that still holds the sc
 
 ## Controlled-Evolution Path
 
-- `sia` remains an aliasing layer for the three package CLIs, plus the two native workspace verbs recorded in Phase 4
+- `sia` remains an aliasing layer for the four package CLIs (`capture-proxy`, `model-headroom`, `model-headroom-refusal`, `model-headroom-paired`), plus the two native workspace verbs recorded in Phase 4
 - `capture-proxy` gains `--sync` only; no other behavior changes
 - A new subcommand or flag requires an explicit operator request recorded in this file before implementation
 
@@ -71,9 +73,8 @@ Measured 2026-11-10 against `master-archive` (the branch that still holds the sc
 
 - `model-headroom-refusal` (refusal-direction extraction) is implemented and smoke-tested
   (Qwen3-0.6b: direction_status=computed, cohen_d=4.36, layer model.layers.16).
-  It is a fringe module: not part of the core verify chain, not client-perspective tested,
-  and parked while higher-priority work (release hygiene, carrier/authority contract) proceeds.
-  Revisit only on explicit operator request.
+  Its `test_refusal_*.py` files are part of the core verify chain and pass with the full suite.
+  Revisit promotion decisions only on explicit operator request.
 
 ## Intervention-Surface Version Tracking (FRINGE — refusal only)
 
@@ -106,7 +107,7 @@ Measured 2026-11-10 against `master-archive` (the branch that still holds the sc
   Refusal remains fringe and is NOT added to the core verify chain; any change to that status
   requires an explicit operator request recorded in this file first.
 
-## Phase 5: Paired-Model Recovery Diagnostics (AUTHORIZED 2026-11-12 — in progress)
+## Phase 5: Paired-Model Recovery Diagnostics (AUTHORIZED — paired package + `model-headroom-paired` console script tracked at HEAD)
 
 **Operator intent, verbatim:** extend the existing measurement machinery so `sia-hu` can help
 answer (1) whether a heavily quantized model's degradation is primarily recoverable optimization

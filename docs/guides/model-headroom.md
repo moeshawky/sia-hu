@@ -5,7 +5,7 @@ understand signals, read output formats. Cross-references
 `architecture/authority-carrier.md` (authority role), `concepts/headroom-signals.md`
 (R-01 through R-09 reference), `concepts/provenance.md` (measured vs synthetic),
 `concepts/frozen-contracts.md` (frozen dataclasses, NFR-01), and
-`reference/cli-flags.md` (all 25 flags). No Python code changes are proposed here.
+`reference/cli-flags.md` (all 31 flags). No Python code changes are proposed here.
 
 ---
 
@@ -13,9 +13,9 @@ understand signals, read output formats. Cross-references
 
 Model Headroom Analyzer — 7 core signals + 2 opt-in gradient diagnostics for
 training headroom on MoE and dense models. Python package, strict types, 25 frozen
-dataclasses (27 including acquire/provenance.py), 95% test coverage.
+dataclasses in `models/types.py` (27 including `acquire/provenance.py`).
 
-**Version:** 0.3.0 — the authority half of sia-hu. Scores; never proxies.
+**Version:** 0.7.0b2 (`pyproject.toml:7` — single project version, no separate `__version__`) — the authority half of sia-hu. Scores; never proxies.
 
 ---
 
@@ -93,7 +93,7 @@ model-headroom --model-name NAME --model-path PATH \
 **Exit codes:** 0 success, 1 error (bad input, unreadable file, analysis failure),
 2 decision-grade not met.
 
-All 25 flags are declared in `src/model_headroom/cli.py:parse_args`.
+All 31 flags are declared in `src/model_headroom/cli.py:parse_args` (measured 2026-11-23).
 
 ---
 
@@ -183,5 +183,5 @@ Subtype detection identifies `hybrid_linear_attention`, `has_vision_tower`, and
 - `concepts/provenance.md` — source_type / verification_status
 - `concepts/frozen-contracts.md` — frozen dataclasses, NFR-01
 - `guides/quickstart.md` — install and bootstrap
-- `reference/cli-flags.md` — all 19 model-headroom flags
+- `reference/cli-flags.md` — all 31 model-headroom flags
 - `reference/env-vars.md` — model_headroom env vars

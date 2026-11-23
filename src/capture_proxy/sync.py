@@ -49,14 +49,6 @@ _INTERVAL_INVALID_TEMPLATE = (
     "  Exit:   2"
 )
 
-_NO_INSTANCE_ID_TEMPLATE = (
-    "error: no sync instance id\n"
-    "  Cause:  --sync-machine-id, CAPTURE_MACHINE_ID, config machine_id,\n"
-    "          hostname, and /etc/machine-id are all empty\n"
-    "  Action: Set CAPTURE_MACHINE_ID or pass --sync-machine-id\n"
-    "  Exit:   1"
-)
-
 _SYNC_CMD_SYNC_DERIVED_TEMPLATE = (
     "error: --sync-cmd sync requires an explicit instance id\n"
     "  Cause:  instance id was derived from hostname or /etc/machine-id;\n"
@@ -83,10 +75,6 @@ _RCLONE_FAILURE_TEMPLATE = (
 _ALREADY_RUNNING_TEMPLATE = (
     "capture-proxy: sync daemon already running (pid {pid}) — stop with: "
     "capture-proxy --sync-stop"
-)
-
-_STALE_PID_TEMPLATE = (
-    "capture-proxy: stale sync PID file (pid {pid} not running) — starting a new loop"
 )
 
 _MACHINE_ID_FALLBACK_TEMPLATE = (
@@ -539,7 +527,7 @@ def sync_stop(pid_file: Path) -> int:
     if not _pid_alive(pid):
         with contextlib.suppress(OSError):
             pid_file.unlink(missing_ok=True)
-        print(_DAEMON_STOPPED_ALREADY_TEMPLATE)
+        print(f"capture-proxy: stale sync pid file (pid {pid} not running)")
         return 0
     try:
         os.kill(pid, signal.SIGTERM)

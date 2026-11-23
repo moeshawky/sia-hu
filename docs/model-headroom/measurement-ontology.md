@@ -85,14 +85,15 @@ A router over E experts emits a distribution p over the experts.
   architectural fact; reporting `0.0` would manufacture "total collapse." Both
   are fabricated measurements. The code emits `signal_status="single_expert"`
   with `balance_ratio=None` (`signals/load_balance.py:84`;
-  `signals/specialization.py:60,82`) — IMPLEMENTED at HEAD.
+  `signals/specialization.py:60,96`) — IMPLEMENTED at HEAD.
 - **Specialization with E = 1:** pairwise cosine over a single vector is
   undefined (no pair exists). Status `single_expert`, no score — same treatment.
 
 ### 4.2 The comparability limit
 
 Because `single_expert` (and `not_applicable`) are excluded from both numerator
-and denominator (`analysis/scoring.py:116-119` at HEAD e80591d):
+and denominator (`analysis/scoring.py:56,170-171` at HEAD a463b16; `_EXCLUDED_STATUSES`
+defined at `:56`):
 
 - dense applicable weight = 0.20 + 0.20 + 0.15 + 0.15 + 0.10 = **0.80**
 - MoE applicable weight = **1.00**

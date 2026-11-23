@@ -108,7 +108,7 @@ def main(args: list[str] | None = None) -> int:
     if not parsed.dry_run:
         proc = _git(push_cmd)
         if proc.returncode != 0:
-            message = proc.stderr.strip() or proc.stdout.strip()
+            message = _redact(proc.stderr.strip() or proc.stdout.strip())
             print(
                 "error: push failed\n"
                 f"  Cause:  {message}\n"

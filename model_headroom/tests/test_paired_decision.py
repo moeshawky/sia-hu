@@ -168,6 +168,19 @@ class TestCoverageGate:
         evidence = evaluate_strategy(record, held_out_keys=["loss"], coverage=None)
         assert evidence.verdict == "REFUTED"
 
+    def test_parameter_overhead_guard_keys_on_parameter_overhead_not_memory_budget(
+        self,
+    ) -> None:
+        # C-CAUSE-6: parameter_overhead is never populated (not derivable from the
+        # record), so missing_evidence must flag it keyed on parameter_overhead
+        # itself — not on memory_budget_gb. memory_budget_gb is set here, so the
+        # OLD wrong guard (keying on memory_budget_gb) would silently omit it.
+        record = _record({"loss": 1.0}, {"loss": 0.7})
+        assert record.memory_budget_gb is not None
+        evidence = evaluate_strategy(record, held_out_keys=["loss"], coverage=0.9)
+        assert evidence.parameter_overhead is None
+        assert "parameter overhead" in evidence.missing_evidence
+
 
 class TestHeldOutKeys:
     def test_requested_held_out_keys_that_were_never_measured_is_inconclusive(

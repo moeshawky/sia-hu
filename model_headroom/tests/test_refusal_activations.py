@@ -341,6 +341,36 @@ class TestLiveCapture:
         assert batches["layers.0"].activations.dtype == torch.float32
 
 
+class TestCoerceHiddenBatch:
+    # C-CAUSE-11: _coerce_hidden_batch must return None for a malformed (ragged
+    # / wrong-typed / empty) payload so one bad prompt returns None and the
+    # remaining prompts in capture_residuals_sglang still complete.
+    def test_ragged_payload_returns_none(self) -> None:
+        from model_headroom.refusal.activations import _coerce_hidden_batch
+
+        ragged = [[1.0, 2.0], [3.0]]  # ragged: rows differ in length
+        assert _coerce_hidden_batch(ragged, "final") is None
+
+    def test_wrong_typed_payload_returns_none(self) -> None:
+        from model_headroom.refusal.activations import _coerce_hidden_batch
+
+        assert _coerce_hidden_batch(["not", "numbers"], "final") is None
+
+    def test_empty_payload_returns_none(self) -> None:
+        from model_headroom.refusal.activations import _coerce_hidden_batch
+
+        assert _coerce_hidden_batch([], "final") is None
+
+    def test_valid_2d_payload_returns_last_row(self) -> None:
+        from model_headroom.refusal.activations import _coerce_hidden_batch
+
+        batch = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+        result = _coerce_hidden_batch(batch, "final")
+        assert result is not None
+        assert result.shape == (1, 3)
+        assert torch.allclose(result, torch.tensor([[4.0, 5.0, 6.0]]))
+
+
 class TestSglangCapture:
     """Exercise the sglang HTTP path against a real local SSE server."""
 

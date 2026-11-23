@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 
 from model_headroom.models.types import GradientWeightPair
@@ -147,3 +149,21 @@ class TestGradWeightRatioEdge:
         result = analyze_grad_weight_ratios(pairs)
         assert result[0].signal_status == "zero_weight"
         assert result[1].signal_status == "insufficient_data"
+
+
+class TestGradWeightRatioNaN:
+    def test_grad_weight_ratio_nan_weight_computed(self) -> None:
+        # NaN weight with finite grad: weight_norm=nan so ratio=nan, but the
+        # finiteness guard only inspects grad_norm, so the signal is still
+        # "computed" with ratio=nan (silent degradation — PINNED, not fixed).
+        pairs = [
+            GradientWeightPair(
+                gradient=torch.ones(10, 10),
+                weight=torch.full((10, 10), float("nan")),
+                layer_name="nan_weight",
+            ),
+        ]
+        result = analyze_grad_weight_ratios(pairs)
+        assert len(result) == 1
+        assert result[0].signal_status == "computed"
+        assert math.isnan(result[0].ratio)

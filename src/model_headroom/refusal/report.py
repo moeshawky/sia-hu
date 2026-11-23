@@ -130,8 +130,16 @@ def generate_refusal_json(report: RefusalDirectionReport) -> str:
         "orthogonalized": report.orthogonalized,
         "cohen_d": report.cohen_d,
         "error_message": report.error_message,
-        "capture_point": "last_token_residual",
-        "source": "base_model_activation_difference",
+        "capture_point": (
+            "weight_delta"
+            if report.axis == "weight_delta_svd"
+            else "last_token_residual"
+        ),
+        "source": (
+            "weight_delta_recovery"
+            if report.axis == "weight_delta_svd"
+            else "base_model_activation_difference"
+        ),
         "normalized": True,
         "layer_stats": [
             {

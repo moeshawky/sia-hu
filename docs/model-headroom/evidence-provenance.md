@@ -20,7 +20,7 @@ measured | synthetic | fixture | estimated | imported | unknown | inferred | una
 ```
 
 while the loader's acceptance set is the **six-value** frozenset
-(`src/model_headroom/models/loader.py:445-448`):
+(`src/model_headroom/models/loader.py:446-448`):
 
 ```
 measured | synthetic | fixture | estimated | imported | unknown

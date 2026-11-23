@@ -70,6 +70,34 @@ root `htmlcov/` with `source = ["capture_proxy", "model_headroom"]`.
 
 ---
 
+## Publication surface audit (post-sync / pre-release)
+
+**Purpose:** Close C-CAUSE-30c — the public-sync mechanism (clone public temp →
+replace `.git` + `.gitignore`) previously had **no second gate** verifying the
+resulting tree is clean. After a sync and before any release, run this audit:
+
+```bash
+# 1. Build the sdist and list its contents
+python -m build --sdist  # or: uv build --sdist
+tar -tzf dist/*.tar.gz | sort > /tmp/sdist-contents.txt
+
+# 2. Fail the audit if any non-public surface leaked into the sdist
+grep -E 'capture-proxy/|docs/maintenance/|SESSION-|AGENTS.md|\.pi/|\.codegraph/' /tmp/sdist-contents.txt && \
+  echo "LEAK DETECTED" || echo "sdist clean"
+
+# 3. Cross-check the public tree itself for the same forbidden paths
+git check-ignore AGENTS.md capture-proxy/ docs/maintenance/ .pi/ .codegraph/ || \
+  echo "public tree clean"
+```
+
+The forbidden paths are: `capture-proxy/`, `docs/maintenance/`, `SESSION-*.md`,
+`AGENTS.md`, `.pi/`, `.codegraph/`. `docs/maintenance/`, `SESSION-*.md`, and the
+agentic/alpha artifacts belong to the private tree and must never reach the public
+tree or the published sdist. The CI publish gate (`publish.yml`) inspects the sdist
+the same way, so this local audit mirrors CI.
+
+---
+
 ## Per-repo variations
 
 ### Authority (model_headroom)

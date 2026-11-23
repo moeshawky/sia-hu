@@ -22,14 +22,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from model_headroom.models.loader import load_activations_from_json
-from model_headroom.signals.load_balance import analyze_load_balance
 
 from capture_proxy.headroom import (
     ACTIVATION_ARTIFACT_SUFFIX,
     HeadroomWriter,
     build_activation_payload,
 )
+from model_headroom.models.loader import load_activations_from_json
+from model_headroom.signals.load_balance import analyze_load_balance
 
 CREATED_AT = "2026-09-29T12:00:00+00:00"
 ARCH = 8

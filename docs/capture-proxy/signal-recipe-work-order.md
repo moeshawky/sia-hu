@@ -23,23 +23,23 @@ Four rules, inherited from the two shipped instances — stated once, binding on
 
 | Instance | Key | Artifact path (deterministic per capture) | Shape contract | Writer branch |
 |---|---|---|---|---|
-| `effective_rank` | `signals["effective_rank"]` | `{day}/{capture_id}-weight_pairs.json` (`headroom.py:1077-1085`) | authority `load_weight_pairs_from_json` shape | `if "effective_rank" in self._signals and self._weights != "off"` (`headroom.py:1080`) |
-| `load_balance` | `signals["load_balance"]` | `{day}/{capture_id}.activations.json` (`headroom.py:1078,1096-1101`, suffix `headroom.py:67`) | authority `load_activations_from_json` shape (`ExpertActivationData.layers: dict[str, dict[str, int]]` + fed/arch/starved metadata, `headroom.py:112-153`) | `if "load_balance" in self._signals` (`headroom.py:1096`) |
+| `effective_rank` | `signals["effective_rank"]` | `{day}/{capture_id}-weight_pairs.json` (planned path `headroom.py:1006-1007`; written `_write_sync` `headroom.py:1390-1404`) | authority `load_weight_pairs_from_json` shape | `if "effective_rank" in self._signals and self._weights != "off"` (`headroom.py:1390`) |
+| `load_balance` | `signals["load_balance"]` | `{day}/{capture_id}.activations.json` (planned path `headroom.py:1009-1012`, suffix `ACTIVATION_ARTIFACT_SUFFIX` at `headroom.py:79`; written `_write_sync` `headroom.py:1420-1425`) | authority `load_activations_from_json` shape (`ExpertActivationData.layers: dict[str, dict[str, int]]` + fed/arch/starved metadata, `build_activation_payload` at `headroom.py:166-248`) | `if "load_balance" in self._signals` (`headroom.py:1420`) |
 
-Handles (live, no reconstruction): `signals: dict = dict.fromkeys(SIGNAL_KEYS)` (`headroom.py:1070`); precomputed `signals = {key: planned.get(key) for key in SIGNAL_KEYS}` (`app.py:1920`); `CapturedHeadroom.signals` (`models.py`); vocabulary `SIGNAL_KEYS` = authority's core-6 verbatim (`names.py:92-99`).
+Handles (live, no reconstruction): `signals: dict = dict.fromkeys(SIGNAL_KEYS)` (`headroom.py:1377` in `_write_sync`); precomputed `signals = {key: planned.get(key) for key in SIGNAL_KEYS}` (`app.py:2448` in `_spawn_headroom`); `CapturedHeadroom.signals` (`models.py:176`); vocabulary `SIGNAL_KEYS` = authority's core-6 verbatim (`names.py:118-125`); CLI-facing `HEADROOM_SIGNALS` at `names.py:129-136`.
 
-Historical probe (OBSERVED from git): commit `60e0e4c` fed `load_balance` via exactly key + suffix + writer branch — no registry, no grammar, no runner. Negative control: `dead_neurons/specialization/loss_saturation/growth_factor` sit `null` today, proving the map tolerates unproduced signals without breaking readers.
+Historical probe (OBSERVED from git): commit `60e0e4c` fed `load_balance` via exactly key + suffix + writer branch — no registry, no grammar, no runner. Negative control: `dead_neurons`/`loss_saturation`/`growth_factor` sit `null` today (no producer), while `load_balance` and `specialization` have producer branches (`headroom.py:1420-1425`, `headroom.py:1406-1418`) — proving the map tolerates unproduced signals without breaking readers.
 
 ## 4. Per-signal recipe schema (the client drops this, then it's set)
 
 Four lines per signal. Filled example is measured; blank row is the door.
 
 ```toml
-# load_balance (shipped — measured against headroom.py:1096-1101)
+# load_balance (shipped — measured against headroom.py:1420-1425)
 [signal.load_balance]
 artifact_shape = "ExpertActivationData (model_headroom loader: load_activations_from_json)"
-path_suffix = ".activations.json"          # ACTIVATION_ARTIFACT_SUFFIX, headroom.py:67
-eligible_request_types = ["chat"]          # inference traffic only; weight reads can't produce it
+path_suffix = ".activations.json"          # ACTIVATION_ARTIFACT_SUFFIX, headroom.py:79
+eligible_request_types = ["chat", "completion", "classification", "image"]  # per _spawn_headroom eligibility, app.py:2406
 ```
 
 ```toml
@@ -57,7 +57,7 @@ Note on the classifier door: `ClassificationResponse{labels: list[str], scores: 
 - A recipe runner, registry module, or TOML grammar engine (the writers + dict already execute; nothing to register into).
 - `/v1/stats` or any new serving route (002 item 3 settled: `jq`/`rg` over JSONL, see `README.md` Aggregates section).
 - New aggregation semantics over weight scalars (rule 4 forbids).
-- Renaming `SIGNAL_KEYS` or CLI names (fixed by the authority / breaking change respectively — `names.py:17-24`).
+- Renaming `SIGNAL_KEYS` or CLI names (fixed by the authority / breaking change respectively — `names.py:118-136`; `SIGNAL_KEYS` at `:118-125`, `HEADROOM_SIGNALS` at `:129-136`).
 
 ## 6. Acceptance
 

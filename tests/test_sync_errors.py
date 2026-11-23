@@ -13,6 +13,7 @@ from unittest import mock
 import pytest
 
 from capture_proxy import sync as sync_mod
+from capture_proxy.__main__ import _CONFIG_KEYS
 from capture_proxy.sync import validate_interval, validate_sync_cmd
 
 
@@ -140,18 +141,7 @@ def test_no_instance_id_error(
 
 def test_sync_min_age_flag_name() -> None:
     """--sync-min-age is the flag name; config key is sync_min_age."""
-    assert "sync_min_age" in [
-        "sync_remote",
-        "sync_cmd",
-        "sync_min_age",
-        "sync_interval",
-        "sync_dry_run",
-        "sync_rclone_opts",
-        "sync_rclone_binary",
-        "sync_pid_file",
-        "sync_log_file",
-        "machine_id",
-    ]
+    assert "sync_min_age" in _CONFIG_KEYS
 
 
 def test_invalid_interval(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:

@@ -13,6 +13,9 @@ if TYPE_CHECKING:
 
 
 def _format_signal_status(signal: Any) -> str:
+    #: signal is Any because SignalResult is accessed generically via getattr
+    #: and its concrete type varies per signal; a precise type adds no safety.
+    #: Justified by dynamic signal shape across the 7 signals.
     name = signal.signal_name.replace("_", " ").title()
     status = signal.status
 

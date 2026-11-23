@@ -155,6 +155,10 @@ def _generate_synthetic_weight_pairs(directory: Path, model_id: str) -> Path:
     Produces multiple pairs across attention and MLP layers with varied
     tensor shapes and optional schema fields (parent_shape, sampling_mode,
     truncated) so downstream signals exercise the full loader contract.
+    The emitted document carries a top-level ``source_type`` key
+    (``"synthetic"``) so the authoritative reader
+    (:func:`model_headroom.models.loader.infer_source_type_from_path`) classifies
+    it as synthetic rather than falling back to the ``measured`` default.
     """
     pairs = [
         {
@@ -191,7 +195,7 @@ def _generate_synthetic_weight_pairs(directory: Path, model_id: str) -> Path:
         },
     ]
     out = directory / WEIGHT_PAIRS_FILE
-    out.write_text(json.dumps({"pairs": pairs}, indent=2))
+    out.write_text(json.dumps({"source_type": "synthetic", "pairs": pairs}, indent=2))
     return out
 
 

@@ -9,6 +9,7 @@ and streaming losslessness with headroom enabled.
 import asyncio
 import glob
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -22,7 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from capture_proxy.app import CaptureProxyApp
+from capture_proxy.app import CaptureProxyApp, _gguf_warned_paths
 from capture_proxy.headroom import (
     HeadroomLogger,
     HeadroomWriter,
@@ -475,6 +476,36 @@ class TestHeadroomWriterUnit:
         sidecar = json.loads(out.read_text())
         assert sidecar["error_body"] == "torch/safetensors not importable"
         assert all(v is None for v in sidecar["signals"].values())
+
+    def test_expert_weights_fatal_torch_missing_note(self, tmp_path):
+        """H2: the specialization emitter's fatal note is the same literal.
+
+        The effective_rank twin is covered above; this pins the
+        ``_capture_expert_weights`` seam (headroom.py:1210-1211) so a
+        mutant dropping that branch cannot survive green.
+        """
+        model_dir = _make_model_dir(tmp_path)
+        w = HeadroomWriter(
+            tmp_path / "h",
+            weights="gate",
+            signals=frozenset({"specialization"}),
+        )
+        capture_id = str(uuid.uuid4())
+        with patch("capture_proxy.headroom._torch_stack_available", return_value=False):
+            out = asyncio.run(
+                w.write_async(
+                    capture_id=capture_id,
+                    parent_raw=tmp_path / "raw.jsonl",
+                    model="m",
+                    model_path=model_dir,
+                    created_at="2026-08-21T19:40:00+00:00",
+                )
+            )
+        assert out is not None
+        assert out.name == f"{capture_id}.headroom.json"
+        sidecar = json.loads(out.read_text())
+        assert sidecar["error_body"] == "torch/safetensors not importable"
+        assert sidecar["signals"]["specialization"] is None
 
     def test_write_gate_full_flow(self, tmp_path):
         model_dir = _make_model_dir(tmp_path)
@@ -1070,6 +1101,61 @@ class TestHeadroomIntegration:
         records = _summary_records(Path(base))
         assert records[0]["headroom"] is None
         assert not (Path(base) / "headroom").exists()
+
+    def test_headroom_skipped_on_4xx_not_only_5xx(self, headroom_proxy):
+        """H1: a 4xx upstream must skip the headroom sidecar (app.py:2410).
+
+        The eligibility gate is ``upstream_status >= 400``; a mutant that
+        narrows it to ``>= 500`` would emit a sidecar claiming headroom on
+        a failed 4xx turn. This pins the 4xx arm explicitly.
+        """
+        proxy, base, _model_dir, mock = headroom_proxy
+        mock.proxy = AsyncMock(
+            return_value=MagicMock(
+                status_code=404,
+                body={"error": "not found"},
+            )
+        )
+        with TestClient(proxy.app) as c:
+            resp = c.post("/v1/chat/completions", json=_chat_body())
+            assert resp.status_code == 404
+        records = _summary_records(Path(base))
+        assert records[0]["headroom"] is None
+        assert not (Path(base) / "headroom").exists()
+
+    def test_gguf_model_path_refused_with_one_warning(self, headroom_proxy, caplog):
+        """H3: a ``.gguf`` model_path is refused with exactly one warning.
+
+        The sidecar reads safetensors only (app.py:2421-2433). A mutant
+        that drops the ``.gguf`` suffix check would let a GGUF path reach
+        the directory gate and emit a sidecar attempt; a mutant that drops
+        the dedup would warn on every capture. This pins both arms: the
+        refusal (headroom stays None) and the one-warning dedup across two
+        captures sharing the same raw path.
+        """
+        import capture_proxy.app as _app_mod
+
+        proxy, _base, _model_dir, _mock = headroom_proxy
+        # Clear the module-level dedup set so a prior test's GGUF path
+        # cannot suppress the warning this test expects to observe.
+        _gguf_warned_paths.clear()
+        gguf_path = "/m/x.gguf"
+        record = _eligible_record_for(gguf_path, "chat")
+        with caplog.at_level(logging.WARNING, logger="capture_proxy.app"):
+            proxy._spawn_headroom(record)
+            proxy._spawn_headroom(record)
+        assert record.headroom is None
+        gguf_warnings = [r for r in caplog.records if "GGUF model path" in r.message]
+        assert len(gguf_warnings) == 1, (
+            f"expected exactly one GGUF refusal warning, got "
+            f"{len(gguf_warnings)}: {[r.message for r in gguf_warnings]}"
+        )
+        # The dedup set now holds the path; a third capture stays silent.
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="capture_proxy.app"):
+            proxy._spawn_headroom(record)
+        assert not any("GGUF model path" in r.message for r in caplog.records)
+        assert gguf_path in _app_mod._gguf_warned_paths
 
     def test_spawn_hook_under_5ms(self, headroom_proxy):
         proxy, _base, _model_dir, _mock = headroom_proxy

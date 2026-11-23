@@ -256,8 +256,12 @@ def evaluate_strategy(
     if coverage is not None:
         uncertainty = 1.0 - coverage
     memory_overhead_gb = record.memory_budget_gb
+    # parameter_overhead is not derivable from the InterventionRecord (no
+    # parameter-count field exists on the record), so it is intentionally left
+    # unset / not-applicable rather than fabricated. The guard below keys on
+    # parameter_overhead itself, not on memory_budget_gb.
     parameter_overhead: int | None = None
-    if record.memory_budget_gb is None:
+    if parameter_overhead is None:
         missing.append("parameter overhead")
     affected_families = _families_for(record.affected_parameters)
     strategy = _strategy_for(record)

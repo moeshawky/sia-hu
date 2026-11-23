@@ -16,7 +16,7 @@ From the repo root (`/kaggle/working/sia-hu`):
 pip install -e ".[headroom]"
 ```
 
-This installs the `sia-hu` package (version 0.3.0, `pyproject.toml:5-7`) in
+This installs the `sia-hu` package (version 0.7.0b2, `pyproject.toml:7`) in
 editable mode plus the `headroom` extra (`pyproject.toml:30-37`): `torch>=2.15`,
 `numpy>=2.5.4`, `safetensors>=0.8.0`, `huggingface_hub>=2.4`, `transformers>=5.22.1`,
 `accelerate>=1.15`. The base install (`pip install -e .`, `pyproject.toml:14-19`)
@@ -276,5 +276,5 @@ File:line references cited throughout are from:
 
 ---
 
-See also: `docs/model-headroom/README.md` (full CLI flag reference, 25 flags,
+See also: `docs/model-headroom/README.md` (full CLI flag reference, 31 flags,
 `cli.py:parse_args`).

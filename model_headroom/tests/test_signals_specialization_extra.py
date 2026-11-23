@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 
 from model_headroom.models.types import ExpertWeights
@@ -36,3 +38,22 @@ class TestSpecializationCollapseThreshold:
         )
         result = analyze_specialization(weights)
         assert result.signal_status == "computed"
+
+
+class TestSpecializationGenericExcept:
+    def test_specialization_generic_except_error(self, monkeypatch: Any) -> None:
+        # Force torch.nn.functional.normalize to raise inside the try block;
+        # the generic except must map to signal_status="error" with
+        # is_collapsed False (distinct from the finiteness guard).
+        weights = ExpertWeights(
+            expert_weights=[torch.randn(4, 8), torch.randn(4, 8)],
+            layer_name="l0",
+        )
+
+        def boom_normalize(*args: Any, **kwargs: Any) -> torch.Tensor:
+            raise RuntimeError("normalize failed")
+
+        monkeypatch.setattr(torch.nn.functional, "normalize", boom_normalize)
+        result = analyze_specialization(weights)
+        assert result.signal_status == "error"
+        assert result.is_collapsed is False

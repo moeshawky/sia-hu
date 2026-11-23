@@ -1771,7 +1771,7 @@ wheels = [
 
 [[package]]
 name = "sia-hu"
-version = "0.7.0b1"
+version = "0.7.0b2"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

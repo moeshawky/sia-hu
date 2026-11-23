@@ -1,7 +1,7 @@
-# CLI flags — all three CLIs plus `sia`
+# CLI flags — all four package CLIs plus `sia`
 
 **Purpose:** Complete flag reference for `capture-proxy`, `model-headroom`,
-`model-headroom-refusal`, and the unified `sia` CLI. Cross-references
+`model-headroom-refusal`, `model-headroom-paired`, and the unified `sia` CLI. Cross-references
 `guides/sia-cli.md` (dispatch behavior), `guides/capture-proxy.md` (carrier usage),
 `guides/model-headroom.md` (authority usage), and `reference/env-vars.md` (env var
 equivalents). No Python code changes are proposed here.
@@ -58,13 +58,16 @@ Settings resolve in order: **CLI flag > env var > config file > default.**
 
 ## model-headroom (authority)
 
-All 25 flags, declared in `src/model_headroom/cli.py:parse_args` (5 new
-acquisition flags added in v0.6.0):
+All 31 flags, declared in `src/model_headroom/cli.py:parse_args` (lines 38-241).
+The five `--acquire*` flags were added in v0.6.0 (`CHANGELOG.md:48-49`):
 
 | Flag | Purpose |
 |------|---------|
 | `--model-name` | Model name for the report |
 | `--model-path` | Path to model directory (HF) or .gguf file |
+| `--model-id` | HF model id; downloads datasets from `{model-id}-headroom` and runs without `--model-name`/`--model-path` (`cli.py:48-53`) |
+| `--dataset-family` | Dataset family for download: dense/moe/auto (default auto) (`cli.py:54-60`) |
+| `--data-dir` | Directory for downloaded datasets (default `~/.cache/headroom/datasets/`; `HEADROOM_DATA_DIR` env) (`cli.py:61-65`) |
 | `--architecture` | Override auto-detection (auto/moe/dense) |
 | `--loss-curve` | Path to loss.json (R-01 training dynamics) |
 | `--isoflop` | Path to isoflop.json (R-02 training dynamics) |
@@ -76,6 +79,9 @@ acquisition flags added in v0.6.0):
 | `--rank-sample-count` | Sample count for R-03 SVD |
 | `--sampling-mode` | Sampling mode for R-03 |
 | `--gradient-provenance-file` | Path to gradient provenance (R-08/R-09) |
+| `--training-provenance-file` | Path to training telemetry provenance JSON (nested under `provenance`) (`cli.py:138-141`) |
+| `--training-source-type` | Override training telemetry source_type (measured/synthetic/fixture/estimated/imported/unknown) (`cli.py:142-153`) |
+| `--training-verification-status` | Override training telemetry verification_status (verified/provenance_incomplete/unverified) (`cli.py:154-162`) |
 | `--weight-pairs-source-type` | Source type override (measured/synthetic/fixture/estimated/imported) |
 | `--mlp-source-type` | MLP source type override |
 | `--analysis-mode` | Analysis mode (decision_grade requires ≥70% coverage) |
@@ -99,22 +105,70 @@ Refusal analysis CLI. Entry point: `model-headroom-refusal = "model_headroom.ref
 
 ---
 
+## model-headroom-paired (authority — paired-model recovery diagnostics)
+
+Entry point: `model-headroom-paired = "model_headroom.paired.cli:main"`
+(`pyproject.toml:60`). Unlike the other CLIs it requires its own subcommand
+(`src/model_headroom/paired/cli.py:446`): `compare`, `decide`, `verify`, or
+`schema-version` (`paired/cli.py:448-484`). Exit 0 on success, 1 on error
+(`paired/cli.py:31-36,489-504`). It measures recorded results; it never executes
+an intervention (`PROJECT-ROADMAP.md:130-132`).
+
+### compare — compare two measurement documents (`paired/cli.py:448-453`)
+
+| Flag | Purpose |
+|------|---------|
+| `--reference` | Reference measurement document (required) |
+| `--candidate` | Candidate measurement document (required) |
+| `--out` | Write report to file instead of stdout |
+| `--outlier-sigma` | Activation-outlier sigma threshold (default 3.0) |
+| `--near-inactive-threshold` | Near-inactive activation threshold (default 1e-3) |
+
+### decide — decide a recovery strategy (`paired/cli.py:455-478`)
+
+| Flag | Purpose |
+|------|---------|
+| `--baseline` | Baseline measurement document (with `--post`) or a pre-built intervention record (without `--post`); required (`paired/cli.py:288-299`) |
+| `--post` | Post-measurement document; with `--baseline` builds an intervention record |
+| `--strategy` | One of `continuous_parameters_frozen_codes` / `targeted_low_rank` / `rebuild_source_before_quantization` (`paired/cli.py:22-26`) |
+| `--held-out-keys` | Comma-separated measurement keys held out from the verdict |
+| `--metric-direction` | `lower_is_better` (default) or `higher_is_better` |
+| `--coverage` | Measured coverage in [0.0, 1.0]; overrides `--comparison` coverage; ≥0.8 required for a SUPPORTED verdict (`paired/cli.py:469-474`) |
+| `--comparison` | Comparison report JSON (from `compare`) carrying coverage |
+| `--store` | Evidence store path to persist the decision |
+| `--intervention-id` | Intervention id (requires `--post`) (`paired/cli.py:292-298`) |
+| `--out` | Write decision to file instead of stdout |
+
+### verify — verify an evidence artifact (`paired/cli.py:480-482`)
+
+| Flag | Purpose |
+|------|---------|
+| `--store` | Evidence store path (required) |
+| `--artifact-id` | Artifact id to verify (required) |
+
+### schema-version — print the measurement schema version (`paired/cli.py:484`)
+
+No flags.
+
+---
+
 ## sia (unified dispatcher)
 
 `sia` has no flags of its own. It dispatches via subcommands:
 
 ```bash
-sia --help                    # lists all five subcommands
+sia --help                    # lists all six subcommands
 sia <subcommand> --help       # shows the underlying CLI's help
 sia capture-proxy <args>      # forwards to capture_proxy.__main__:main
 sia model-headroom <args>     # forwards to model_headroom.cli:main
 sia model-headroom-refusal <args>   # forwards to model_headroom.refusal.cli:main
+sia model-headroom-paired <args>    # forwards to model_headroom.paired.cli:main
 sia doctor <args>             # forwards to sia.doctor:main (read-only preflight)
 sia publish <args>            # forwards to sia.publish:main (push + verify, never auto-commits)
 ```
 
 Exit codes propagate from the underlying CLI. `sia` adds no flags, no behavior,
-no new subcommands beyond the five it dispatches. `doctor` and `publish` are
+no new subcommands beyond the six it dispatches. `doctor` and `publish` are
 `sia`-owned verbs; they do not modify existing CLIs.
 
 | `sia` subcommand | Module | Role |
@@ -122,6 +176,7 @@ no new subcommands beyond the five it dispatches. `doctor` and `publish` are
 | `sia capture-proxy` | `capture_proxy.__main__:main` | Carrier — emits Hu (capture artifacts) |
 | `sia model-headroom` | `model_headroom.cli:main` | Authority — scores Sia (headroom analysis) |
 | `sia model-headroom-refusal` | `model_headroom.refusal.cli:main` | Refusal analysis |
+| `sia model-headroom-paired` | `model_headroom.paired.cli:main` | Paired-model recovery diagnostics (compare/decide/verify/schema-version) |
 | `sia doctor` | `sia.doctor:main` | Read-only workspace preflight; exit 0/1/2 |
 | `sia publish` | `sia.publish:main` | Push current branch; verify remote ref matches local HEAD; never auto-commits; `--dry-run`/`--allow-dirty`; credential URLs redacted |
 

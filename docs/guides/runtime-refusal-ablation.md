@@ -293,6 +293,72 @@ No inference engine is installed (`import vllm` and `import sglang` both raise `
 
 Every engine-specific and behaviour-specific claim in this document is labelled inline with its tier. The complete mapping is the **TIER LEDGER** in Appendix A below (shipped inside this document; no separate ledger file is maintained).
 
+## 13. Artifact geometry and the widened-stream trap
+
+Some architectures do not expose their hidden states in the same width as their
+residual writers. Hyper-connection models (e.g. `qwen4_exp`, `_widen_streams()`
+= `cat([h, h, h, h])`) capture directions in the **widened** space:
+`capture_width = stream_count * hidden_size` (10240 = 4 x 2560 on the ticket-008
+checkpoint). Installing such a direction on residual writers raises
+`RuntimeError: The size of tensor a (2560) must match the size of tensor b (10240)`
+inside `init_all_cuda_graphs()` — after model load, at the worst possible time.
+[TIER A — reproduced live 2026-11-21, ticket 008 failure ledger]
+
+The API is now geometry-aware:
+
+1. **Declared geometry is validated.** `RefusalArtifact.metadata` carries
+   `capture_space` (`residual` | `widened_stream`), `capture_width`,
+   `source_hidden_size`, `stream_count`, `fold_mode`, and `geometry_id`
+   (sha256 of the tensor bytes). Bad geometry fails at construction, not at
+   forward time.
+2. **Undeclared widened captures are inferred on load.** `load_artifact()`
+   infers `capture_space="widened_stream"` when
+   `source_hidden_size * stream_count == direction length` and `stream_count > 1`.
+   A widened artifact then refuses installation with a message naming the
+   remedy. [TIER A — `test_refusal_geometry.py`]
+3. **Width preflight before any hook.** `validate_install()` (called by
+   `install_refusal_ablation` before registering a hook) compares the direction
+   width against each writer's actual output width and refuses with
+   `direction width 10240 != writer <name> output width 2560; fold via
+   project_direction_to_residual(...)`. It does **not** trust `out_features`
+   alone: for fused writers it reads the first >=2-D parameter's leading dim.
+   [TIER A — `test_refusal_geometry.py`, plus live probe against the real
+   10240-wide artifact]
+4. **Projection with provenance.** `project_direction_to_residual(artifact,
+   hidden_size=..., mode="mean"|"first"|"least_squares")` returns a NEW
+   artifact whose metadata records the transformation (`fold_mode`,
+   `folded_from_capture_width`) and a `geometry_id` over the *new* tensor.
+   `first` is rejected for declared multi-stream artifacts (the stream index
+   is positional, not semantically privileged).
+   For the concatenated-replication objective, the exact least-squares
+   solution is the chunk mean: `mean` and `least_squares` agree to ~1e-7 on
+   the real qwen4_exp artifact (measured 2026-11-21). `least_squares` is the
+   validated solver path; `mean` is its analytic form kept for speed.
+   [TIER A — measured]
+
+```python
+artifact = load_artifact("/path/to/direction")  # widened → inferred
+folded = project_direction_to_residual(artifact, hidden_size=2560)
+handle = install_refusal_ablation(model, folded, strength=1.0, targets=["auto"])
+```
+
+## 14. Hybrid-model deployment notes (qwen4_exp class)
+
+Measured on the 2026-11-21 blackfrost session (SGLang 0.5.23, SM120, 62 GiB
+host, PLE offloaded to pinned host memory). These are properties of the model
+class, not of one host — re-derive for a different machine:
+
+- **PLE pinned allocation:** the default rounding requested a 128 GiB pinned
+  allocation; `pinned_max_round_threshold_mb = 48828` fits. Derive per host
+  (host RAM and PLE table size), do not copy blindly.
+- **PLE dtype:** an fp8 PLE override (`text_config.ple_embedding_dtype =
+  float8_e4m3fn`) is required to fit the table in 62 GiB.
+- **MoE runner:** `--moe-runner-backend flashinfer_cutlass` is required for
+  the NVFP4 hybrid MoE; the TRTLLM backend fails with `'FusedMoE' object has
+  no attribute 'g1_scale_c'`. [TIER A — measured on this host]
+- **The `sia` shim on the host default Python lacks torch**; run capture and
+  probe tooling in the serving interpreter (`/opt/pytorch/bin/python`).
+
 ## Appendix A — Tier ledger
 
 This appendix is the complete mapping of every claim in this document to its tier and its evidence. It is shipped inside this document; there is no separate "TIER LEDGER maintained alongside this document" file.
@@ -360,4 +426,10 @@ This appendix is the complete mapping of every claim in this document to its tie
 | §10 | domain gate not implemented | C | roadmap only |
 | §11 | selective intervention gate | C | roadmap only |
 | §12 | tier definitions | A | this document |
+| §12 | no inference engine in the declared env | A | measured 2026-11-12; **superseded on the serving host 2026-11-21** — SGLang 0.5.23 present and serving (ticket 008 evidence) |
+| §13 | widened-direction crash at graph capture | A | live reproduction 2026-11-21, ticket 008 ledger rows 1-4 |
+| §13 | geometry validation + inference in `load_artifact` | A | `runtime.py` + `test_refusal_geometry.py` |
+| §13 | width preflight before hook registration | A | `validate_install`; `test_refusal_geometry.py` |
+| §13 | mean == least_squares on concatenated-replication objective | A | measured 1e-7 delta on real qwen4_exp artifact, 2026-11-21 |
+| §14 | flashinfer_cutlass / fp8 PLE / pinned-threshold notes | A | measured on the blackfrost host 2026-11-21 |
 | Appendix | tier ledger shipped inside document | A | this document |

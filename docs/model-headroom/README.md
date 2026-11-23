@@ -1,6 +1,6 @@
 # model_headroom
 
-Model Headroom Analyzer — 7 core signals + 2 opt-in gradient diagnostics for training headroom on MoE and dense models. Python package, strict types, 25 frozen dataclasses (27 including acquire/provenance.py), 95% test coverage.
+Model Headroom Analyzer — 7 core signals + 2 opt-in gradient diagnostics for training headroom on MoE and dense models. Python package, strict types, 25 frozen dataclasses in `models/types.py` (27 including the 2 in `acquire/provenance.py`).
 
 ## Installation
 
@@ -13,7 +13,7 @@ pip install -e ".[headroom]"   # torch / numpy / safetensors
 pip install -e ".[dev,headroom,gguf]"   # everything
 ```
 
-Requires Python ≥3.12, `torch>=2.15`, `numpy>=2.5.4`. Package version 0.3.0.
+Requires Python ≥3.12, `torch>=2.15`, `numpy>=2.5.4`. Package version 0.7.0b2 (`pyproject.toml:7`; there is no separate `__version__` in `src/model_headroom/__init__.py` — the single project version is authoritative).
 `pip install -e .` alone installs the carrier-free base package; the heavy
 scoring deps live in the `headroom` extra, which is what keeps a carrier-only
 install from pulling torch. Entry points: `model-headroom`, `model-headroom-refusal`.
@@ -76,7 +76,7 @@ model-headroom --model-name NAME --model-path PATH \
 
 Exit codes: `0` success, `1` error (bad input, unreadable file, analysis failure), `2` decision-grade not met.
 
-All 25 flags are declared in `src/model_headroom/cli.py:parse_args` — the list above is grouped, not truncated.
+All 31 flags are declared in `src/model_headroom/cli.py:parse_args` (`add_argument` count = 31, measured 2026-11-23) — the list above is grouped, not truncated.
 
 ## Signals
 
@@ -108,9 +108,9 @@ Architecture subtype detection identifies `hybrid_linear_attention` (mixed full/
 
 ### GGUF scope and limits
 
-Supported: dense and hybrid-attention GGUF; legacy Prism ternary Q2_0 via the ternary dequant adapters (`models/gguf_loader.py:634-635`, `:705-706`); config from KV metadata (`load_gguf_config`, `models/loader.py:141`); family from `expert_count` (`models/loader.py:142`); subtype/attention/vision/MTP flags derived from the tensor-name table with `detection_source="gguf_tensor_names"` (`models/loader.py:135-173`).
+Supported: dense and hybrid-attention GGUF; legacy Prism ternary Q2_0 via the ternary dequant adapters (`_dequantize_gguf_tensor` dispatches to `dequantize_ternary` at `models/gguf_loader.py:712-720`, calls at `:763` and `:882`); config from KV metadata (`load_gguf_config`, `models/gguf_loader.py:488`); family from `expert_count` (`models/loader.py:154`, `has_moe = config.expert_count >= 2`); subtype/attention/vision/MTP flags derived from the tensor-name table with `detection_source="gguf_tensor_names"` (`detect_architecture_details`, `models/loader.py:138-184`).
 
-Not supported: MoE expert extraction end-to-end — there is no architecture→tensor-name resolution; `extract_expert_weight_from_gguf` (`models/gguf_loader.py:595`) is a single-tensor reader keyed by literal tensor name. Headroom sidecar capture from a `.gguf` — safetensors-only, one warning, skipped by design (`src/capture_proxy/app.py:2384`, `:2421`). GGUF weight samples default to provenance `fixture`, which yields 0% measured coverage by construction; `--weight-pairs-source-type measured` opts in (`src/model_headroom/cli.py:426-441`). Sampling: `--rank-sample-count` sets the tile rows (default `None`, `cli.py:118`); samples come from layers `0`, `block_count//2`, `block_count-1` across `ffn_gate`/`ffn_up`/`ffn_down` (`cli.py:200-205`); the printed rank percentage is tile-relative and the parent ceiling + coverage are printed beside it.
+Not supported: MoE expert extraction end-to-end — there is no architecture→tensor-name resolution; `extract_expert_weight_from_gguf` (`models/gguf_loader.py:608`) is a single-tensor reader keyed by literal tensor name. Headroom sidecar capture from a `.gguf` — safetensors-only, one warning, skipped by design (`src/capture_proxy/app.py:2384`, `:2421-2426`). GGUF weight samples default to provenance `fixture`, which yields 0% measured coverage by construction (`src/model_headroom/cli.py:846-852`); `--weight-pairs-source-type measured` opts in (`cli.py:838-845`). Sampling: `--rank-sample-count` sets the tile rows (default `None`, `cli.py:122-128`); samples come from layers `0`, `block_count//2`, `block_count-1` across `ffn_gate`/`ffn_up`/`ffn_down` (`cli.py:281-286`); the printed rank percentage is tile-relative and the parent ceiling + coverage are printed beside it.
 
 ## Scoring
 
@@ -171,7 +171,7 @@ Output: `--output-format {text,json,safetensors,both}` (default `text`);
 
 ## Further Docs
 
-- `PROJECT-ROADMAP.md` — living plan, completed phases 1–4, evidence-gated phases 5–9.
+- `PROJECT-ROADMAP.md` — living plan, completed phases 1–4, evidence-gated phases 5–9 (HEAD-pinned design record; see § 3 for measured baseline).
 - `TEST_PROTOCOL.md` — adversarial test protocol, scope, success/failure criteria.
 - `docs/guides/runtime-refusal-ablation.md` — refusal-direction operator guide; the TIER-A live-execution evidence lives there.
 - Contributor constraints: frozen dataclasses, lint→typecheck→test order (see repo README).
@@ -182,28 +182,28 @@ Package source lives at the root as `src/model_headroom/`, under the single
 `sia-hu` project (one `pyproject.toml`, one `uv.lock`, one ruff/mypy/pytest
 config, all verified from the repo root).
 
-Measured by `ix` across the codebase:
+Measured 2026-11-23 across the current tree (`find`/`wc`/`grep`; the package grew well beyond the pre-unification counts this table once carried):
 
 | Metric | Value |
 |--------|-------|
-| Source files | 23 Python files, 3,977 lines |
-| Test files | 42 files, 6,109 lines |
-| Frozen dataclasses | 21 (all in `models/types.py`) |
-| Signal modules | 9 signals + `__init__` |
+| Source files | 58 `.py` files under `src/model_headroom/` (16,174 lines) |
+| Test files | 72 `test_*.py` files under `model_headroom/tests/` (16,191 lines) |
+| Frozen dataclasses | 25 in `models/types.py` (`@dataclass` count = `frozen=True` count = 25) + 2 in `acquire/provenance.py` |
+| Signal modules | 9 signals + `__init__` (7 core + `gradient_coherence` + `gradient_effective_rank`) |
 | Reporting modules | 2 (`human_report.py`, `json_report.py`) |
-| Analysis modules | `orchestrator.py` (522 lines), `scoring.py` (381 lines) |
-| Model types | `types.py` (306 lines), `loader.py` (585 lines) |
-| CLI entry | `cli.py` — `model-headroom` command |
-| Test assertions | 422 test functions |
-| `py.typed` marker | Present |
+| Analysis modules | `orchestrator.py` (772 lines), `scoring.py` (505 lines) |
+| Model types | `types.py` (413 lines), `loader.py` (1025 lines) |
+| CLI entry | `cli.py` — `model-headroom` command (995 lines) |
+| Test functions | 1061 `def test_*` under `model_headroom/tests/` |
+| `py.typed` marker | Present (`src/model_headroom/py.typed`) |
 
 ## Key Conventions
 
 - **mypy strict = true** — no `Any` without justification
 - **25 frozen dataclasses (27 including acquire/provenance.py)** in `models/types.py` — all immutable
 - **Weights resolve through `device.py`** — accelerator preferred (cuda, then xpu, then mps), CPU as fallback (NFR-01).
-- **Skipped signals score 0.5** (neutral) in composite score; not_applicable signals are excluded entirely
-- **Provenance-aware scoring** — measured, synthetic, fixture, estimated, imported data classified and weighted separately
+- **Skipped signals score 0.5** (neutral prior) in composite score; `not_applicable` and `single_expert` signals are excluded entirely (`analysis/scoring.py:56,170`)
+- **Provenance-aware scoring** — measured, synthetic, fixture, estimated, imported, unknown data classified and weighted separately (`SourceType`, `models/types.py:14-25`; six accepted externally, `models/loader.py:446-448`)
 - **Measured headroom score** separated from legacy composite with coverage and uncertainty bounds
 - **One project**: this package ships inside the root `sia-hu` project; install, config, and verify commands are root-level (see `../../README.md`)
 

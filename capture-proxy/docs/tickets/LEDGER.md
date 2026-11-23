@@ -14,6 +14,7 @@ A receiving agent must be able to tell that a foreign agent filed the claim.
 
 | [006-FINETUNE_USABLE_CAPTURE.md](006-FINETUNE_USABLE_CAPTURE.md) | 2026-10-15 | capture-proxy (filed while mining a 6.7 GiB mirrored corpus for a code-summarization finetune) | BUILD agent, this session |
 | [007-SYSTEMONE_ROUTER_CAPTURE_WIRING.md](007-SYSTEMONE_ROUTER_CAPTURE_WIRING.md) | 2026-11-16 | capture-proxy (supersedes 002; corrected protocol name from "openjev" to "systemone", matching the actual endpoint `:3000/v1/systemone`) | BUILD agent, this session |
+| [008-HYBRID_MOE_REFUSAL_ABLATION.md](008-HYBRID_MOE_REFUSAL_ABLATION.md) | 2026-11-21 | blackfrost serving session (filed from live SGLang 0.5.23 / SM120 ablation integration on CYBER-FROST-3.8-NVFP4-V2: 10240→2560 hyper-connection width crash, suffix-only writer discovery, no width preflight, no in-engine adapter, capture-proxy intervention provenance) | BUILD agent, this session |
 
 ## Rules
 

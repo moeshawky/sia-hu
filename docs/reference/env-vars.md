@@ -48,10 +48,15 @@ proposed here.
 
 ## model_headroom env vars
 
-model_headroom does not declare runtime env vars in its public interface — all
-configuration is via CLI flags. See `reference/cli-flags.md` for the 25 flags.
+model_headroom is configured primarily via CLI flags — see `reference/cli-flags.md`
+for the 31 flags. The acquisition/download path reads one env var:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `HEADROOM_DATA_DIR` | `~/.cache/headroom/datasets/` | Directory for downloaded datasets; used when `--data-dir` is not given. Precedence: `--data-dir` flag > `HEADROOM_DATA_DIR` > default (`src/model_headroom/download.py:28-35`). |
+
 **There is no device-related env var** — `--device {auto,cuda,cpu}` is CLI-only
-(`src/model_headroom/cli.py:162-167`).
+(`src/model_headroom/cli.py:192-198`).
 
 ---
 

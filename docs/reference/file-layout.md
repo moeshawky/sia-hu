@@ -13,7 +13,7 @@ changes are proposed here.
 sia-hu/
   README.md                  → project overview
   LICENSE                    → MIT
-  PROJECT-ROADMAP.md         → unified `sia` CLI plan, phases 1-2
+  PROJECT-ROADMAP.md         → unified `sia` CLI plan (phases 1-4 complete; phase 5 authorized)
   pyproject.toml             → single project (sia-hu); hatchling build
   uv.lock                    → single lockfile at root
   sia doctor                 → read-only workspace preflight (no commit/push)
@@ -51,7 +51,7 @@ src/
     names.py       → Shared name contract (stdlib only, R-01 safe)
     sync.py        → Native off-box capture sync (rclone subprocess, lazy import)
   model_headroom/            → scoring authority package
-    cli.py           → CLI entry point (25 flags, 5 new `--acquire*` in v0.6.0)
+    cli.py           → CLI entry point (31 flags; 5 `--acquire*` added in v0.6.0)
     __main__.py      → Enables python -m model_headroom
     analysis/
       orchestrator.py  → Runs signals with timing, assembles HeadroomReport
@@ -73,7 +73,9 @@ src/
       specialization.py        → R-07
       gradient_coherence.py    → R-08 (diagnostic)
       gradient_effective_rank.py → R-09 (diagnostic)
-  sia/                       → unified `sia` CLI dispatcher
+    refusal/           → Refusal analysis (backs `model-headroom-refusal`)
+    paired/            → Paired-model recovery diagnostics (backs `model-headroom-paired`)
+  sia/                       → unified `sia` CLI dispatcher (cli.py, doctor.py, publish.py)
 ```
 
 ---
@@ -83,6 +85,7 @@ src/
 ```
 capture-proxy/tests/         → carrier pytest tests (all upstream mocked)
 model_headroom/tests/        → authority pytest tests
+tests/                       → root tests (sia CLI, sync, publish, doctor)
 ```
 
 ---
@@ -90,11 +93,13 @@ model_headroom/tests/        → authority pytest tests
 ## Subrepo directories
 
 ```
-capture-proxy/              → carrier subtree
+capture-proxy/              → carrier subtree (kept artifacts only)
   tests/                    → carrier pytest tests
   config/capture-proxy.toml → canonical default config
-  scripts/                  → capture_query.py, verify_routed_experts.py
-  (docs/README/roadmap moved to docs/capture-proxy/)
+  docs/tickets/             → live ticket ledger (10, unique)
+
+scripts/                    → root operational tools
+  capture_query.py          → capture-corpus query tool (relocated from nested tree)
 
 model_headroom/             → authority subtree
   tests/                    → authority pytest tests

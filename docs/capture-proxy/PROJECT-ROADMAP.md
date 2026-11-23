@@ -7,9 +7,9 @@ Capture proxy for llama.cpp/ollama/node-llama-cpp/vLLM — logs raw JSONL of all
 ## Current State (as of measurement)
 
 - **Version**: 0.2.0 (pyproject.toml)
-- **Codebase**: ~12,111 lines across 10 source modules + 18 test files
-- **Tests**: 361 collected, 361 passing (was 246 at last maintenance; +115 from alias + headroom tests)
-- **Subsystem count**: 10 source modules (see Functional Surface Ledger below)
+- **Codebase**: ~12,111 lines across 17 source modules (`src/capture_proxy/*.py`) + 32 test files in `capture-proxy/tests/` (plus 8 in root `tests/`)
+- **Tests**: 685 test functions in `capture-proxy/tests/` (counted via `rg`; pass/fail not re-verified here)
+- **Subsystem count**: 17 source modules (see Functional Surface Ledger below)
 - **Uncommitted work**: Model alias feature partially done (app.py, __main__.py, models.py modified; alias.py + 6 test files untracked)
 - **Tests passing**: ✅ Yes (361/361)
 - **Tests existing**: ✅ Yes (18 test files)
@@ -76,13 +76,13 @@ The proxy serves as an observability and routing layer between agent workloads a
 
 ### Headroom Model Integration
 - [x] Headroom sidecar covers the four eligible request types: chat, completion, classification, image (embeddings/rerank excluded)
-- [x] `task` field propagated to headroom sidecar (HeadroomRef v6, CapturedHeadroom v6)
+- [x] `task` field propagated to headroom sidecar (HeadroomRef v6, CapturedHeadroom v7)
 - [x] `_spawn_headroom` eligibility extended to include classification and image
 - [ ] Loss saturation capture via model_headroom `--loss-curve` (proxy emits inference data only; model_headroom scores R-01)
 - [ ] Growth factor capture via model_headroom `--isoflop` (proxy emits latency data only; model_headroom scores R-02)
 - [ ] Dead neurons capture via model_headroom `--mlp-activations-file` (proxy does not capture activations; model_headroom scores R-05)
 - [ ] Load balance capture for MoE variants via model_headroom `--activations` (requires vLLM `routed_experts` exposure)
-- [ ] Specialization capture via model_headroom `--expert-weights-file` (proxy does not capture expert weights; model_headroom scores R-07)
+- [ ] Specialization capture via model_headroom `--expert-weights-file` (proxy emits the expert-weights artifact via `_capture_expert_weights` at `headroom.py:1178-1288` when the `specialization` signal is enabled; model_headroom scores R-07 from it)
 
 ## Observed Shortcomings — measured 2026-11-07 (end-to-end, ornith-1.5-9b)
 

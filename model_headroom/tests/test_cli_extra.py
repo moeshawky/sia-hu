@@ -720,3 +720,30 @@ class TestCliDataFileErrorMessages:
             "Use --weight-pairs-file to provide a weight_pairs JSON file; "
             "see src/model_headroom/download.py for the expected JSON format."
         ) in err
+
+
+class TestCliGGUFImportError:
+    def test_gguf_weight_samples_import_error_prints_warning(
+        self, tmp_path: Any, monkeypatch: Any, capsys: Any
+    ) -> None:
+        import sys
+        import types
+
+        from model_headroom.cli import _gguf_weight_samples
+
+        fake_file = tmp_path / "model.gguf"
+        fake_file.write_bytes(b"fake")
+
+        # Force `from model_headroom.models.gguf_loader import load_gguf_config`
+        # to raise ImportError by placing a module object (without load_gguf_config)
+        # in sys.modules, exercising the ImportError branch -> stderr warning +
+        # None.
+        fake_module = types.ModuleType("model_headroom.models.gguf_loader")
+        monkeypatch.setitem(
+            sys.modules, "model_headroom.models.gguf_loader", fake_module
+        )
+
+        result = _gguf_weight_samples(str(fake_file), "single_tile", None, "cpu")
+        assert result is None
+        err = capsys.readouterr().err
+        assert "install the [gguf] extra" in err

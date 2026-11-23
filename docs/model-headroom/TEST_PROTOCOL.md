@@ -1,10 +1,10 @@
 # Test Protocol: Model Headroom Analyzer
 
 **Version:** 1.2
-**Date:** 2026-09-24
-**System:** `/kaggle/working/model_headroom/`
+**Date:** 2026-09-24 (protocol design snapshot — coverage/test counts below are a historical measurement from that date, not current; the tree has grown substantially since)
+**System:** `/kaggle/working/sia-hu/` (single root project; package at `src/model_headroom/`)
 **Type:** CLI Tool + Python Library
-**Current coverage:** 394 passed, 12 skipped, 0 failed | 95% line coverage | 42 test files
+**Coverage at time of writing (2026-09-24, historical):** 394 passed, 12 skipped, 0 failed | 95% line coverage | 42 test files. Re-measure before relying on these figures — current tree measured 2026-11-23 at 72 test files / 1061 `def test_*` under `model_headroom/tests/`.
 
 ---
 
@@ -94,35 +94,35 @@ cli.py (entry) → analysis/orchestrator.py → 9 signals/* (7 core + 2 opt-in d
 
 | Component | File | Entry Point | Purpose |
 |-----------|------|-------------|---------|
-| CLI entry | `cli.py:93` | `main()` | argparse CLI, loads JSON data files, calls orchestrator |
+| CLI entry | `cli.py:550` | `main()` | argparse CLI, loads JSON data files, calls orchestrator |
 | Module entry | `__main__.py:7` | `sys.exit(main())` | Enables `python -m model_headroom` |
-| Orchestrator | `analysis/orchestrator.py:85` | `run_analysis()` | Runs all 7 core signals with timing, assembles HeadroomReport |
-| Signal runner | `analysis/orchestrator.py:30` | `_run_signal()` | Wraps each signal with timing + error handling |
-| Scoring | `analysis/scoring.py:103` | `compute_headroom_score()` | Weighted average of 7 core signal scores → [0.0, 1.0] |
-| Recommendations | `analysis/scoring.py:134` | `generate_recommendations()` | At least 3 actionable strings (R-08) |
-| JSON report | `reporting/json_report.py:50` | `generate_json_report()` | Structured JSON output |
-| Human report | `reporting/human_report.py:72` | `generate_human_report()` | 80-col terminal, max 200 lines |
-| Type contracts | `models/types.py:1` | 25 frozen dataclasses (27 including acquire/provenance.py) | All input/output/error types |
-| Model loader | `models/loader.py:1` | 7 loader functions | Weight extraction, JSON loading |
+| Orchestrator | `analysis/orchestrator.py:180` | `run_analysis()` | Runs all 7 core signals with timing, assembles HeadroomReport |
+| Signal runner | `analysis/orchestrator.py:130` | `_run_signal()` | Wraps each signal with timing + error handling |
+| Scoring | `analysis/scoring.py:146` | `compute_headroom_score()` | Weighted average of 7 core signal scores → [0.0, 1.0] |
+| Recommendations | `analysis/scoring.py:373` | `generate_recommendations()` | Actionable strings |
+| JSON report | `reporting/json_report.py:53` | `generate_json_report()` | Structured JSON output |
+| Human report | `reporting/human_report.py:236` | `generate_human_report()` | 80-col terminal, max 200 lines |
+| Type contracts | `models/types.py` | 25 frozen dataclasses (+2 in acquire/provenance.py) | All input/output/error types |
+| Model loader | `models/loader.py` | 16 public functions | Weight extraction, JSON loading |
 
 **7 Signal Modules:**
 
 | Signal | File | Public Function |
 |--------|------|-----------------|
-| Loss Saturation | `signals/loss_saturation.py:19` | `analyze_loss_saturation()` |
-| Growth Factor | `signals/growth_factor.py:85` | `analyze_growth_factor()` |
-| Effective Rank | `signals/effective_rank.py:19` | `compute_effective_rank()` |
-| Grad/Weight Ratio | `signals/grad_weight_ratio.py:20` | `analyze_grad_weight_ratios()` |
+| Loss Saturation | `signals/loss_saturation.py:16` | `analyze_loss_saturation()` |
+| Growth Factor | `signals/growth_factor.py:84` | `analyze_growth_factor()` |
+| Effective Rank | `signals/effective_rank.py:13` | `compute_effective_rank()` |
+| Grad/Weight Ratio | `signals/grad_weight_ratio.py:21` | `analyze_grad_weight_ratios()` |
 | Dead Neurons | `signals/dead_neurons.py:19` | `analyze_dead_neurons()` |
-| Load Balance | `signals/load_balance.py:18` | `analyze_load_balance()` |
-| Specialization | `signals/specialization.py:19` | `analyze_specialization()` |
+| Load Balance | `signals/load_balance.py:17` | `analyze_load_balance()` |
+| Specialization | `signals/specialization.py:17` | `analyze_specialization()` |
 
 **2 Diagnostic Signal Modules:**
 
 | Signal | File | Public Function |
 |--------|------|-----------------|
-| Gradient Coherence | `signals/gradient_coherence.py` | `compute_gradient_coherence()` |
-| Gradient Effective Rank | `signals/gradient_effective_rank.py` | `compute_gradient_effective_rank()`, `analyze_gradient_effective_ranks()` |
+| Gradient Coherence | `signals/gradient_coherence.py:32` | `compute_gradient_coherence()` |
+| Gradient Effective Rank | `signals/gradient_effective_rank.py:22` | `compute_gradient_effective_rank()`, `analyze_gradient_effective_ranks()` (`:118`) |
 
 **Dependency Graph:**
 ```
@@ -163,7 +163,7 @@ No circular imports detected.
 | 11 | `_signal_to_dict` uses `__dict__` — won't serialize torch.Tensors to JSON | Runtime crash on tensor fields | HIGH |
 | 12 | `load_model_config` not called from `cli.py` | Dead code | LOW |
 | 13 | `extract_expert_weights_for_layer` not called from anywhere | Dead code | MEDIUM |
-| 14 | `SignalError` dataclass defined but never used | Error handling uses string messages | MEDIUM |
+| 14 | Error handling uses string messages (`error_message` fields); no `SignalError` type exists anywhere in `src/` (measured 2026-11-23) | `grep -rn SignalError src/` returns no matches | LOW |
 | 15 | ~~NFR-03 says py312 but pyproject.toml requires ≥3.10~~ RESOLVED 2026-11 — pyproject floor raised to ≥3.12 | Version mismatch | LOW |
 
 ---

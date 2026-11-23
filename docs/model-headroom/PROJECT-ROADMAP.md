@@ -632,8 +632,8 @@ zero-prior arithmetic while named for the neutral prior, fails.
   (excluded / no-evidence→0.5 / unusable→0.0) without adding values —
   UNVERIFIED until committed.
 - **`EvidenceStore` hardcodes `software_version="0.3.0"`**
-  (`analysis/evidence_store.py:78`) while the package is `0.4.0`
-  (`pyproject.toml`) — an audit-identity defect: artifacts claim the wrong
+  (`analysis/evidence_store.py:78`, still present 2026-11-23) while the package is
+  `0.6.0` (`pyproject.toml:7`) — an audit-identity defect: artifacts claim the wrong
   software version. Fix belongs with Phase 13/M-doc (read from package
   metadata, never a literal).
 - **Signal-name seam:** the 6-name carrier `SIGNAL_KEYS` vs the 7 scored
@@ -902,7 +902,7 @@ M-doc; preserved here so the drift record survives even if the edits slip.
 |---|---------------|----------|----------------|
 | 1 | "21 frozen dataclasses" | `docs/concepts/frozen-contracts.md:13`; `docs/architecture/authority-carrier.md:29,79`; root `AGENTS.md` (model_headroom section); `docs/model-headroom/README.md` (header) | **25** (`types.py`, `@dataclass` = `frozen=True` = 25 at HEAD) |
 | 2 | Sidecar "schema_version currently 6" | `docs/architecture/contract.md:35,105` | `CaptureRecord` **6** / `CapturedHeadroom` (the sidecar file schema) **7** (`src/capture_proxy/models.py:121,168`) |
-| 3 | "CLI entry (20 flags)" | `docs/architecture/authority-carrier.md:35`; old roadmap "19 args" | **28** `add_argument` calls in `cli.py` at HEAD (23 base + 5 `--acquire*` flags added in v0.6.0) |
+| 3 | "CLI entry (20 flags)" | `docs/architecture/authority-carrier.md:35`; old roadmap "19 args" | **31** `add_argument` calls in `cli.py` on the current tree (a463b16, measured 2026-11-23); the e80591d baseline had 23 |
 | 4 | `EvidenceStore` claims 0.3.0 | `analysis/evidence_store.py:78` | package is **0.4.0** (`pyproject.toml`) |
 | 5 | "`--decision-grade`" flag | old roadmap Phase 13-era text; `docs/maintenance/2026-11-13-ornith-headroom-pitfalls.md:153`; `docs/model-headroom/README.md` | the flag is **`--analysis-mode {diagnostic,decision_grade}`** (`cli.py:98-101`); there is no `--decision-grade` |
 | 6 | "dense models mark R-06/R-07 `not_applicable`" | `docs/concepts/headroom-signals.md:141-142,162-163,209-211`; `docs/architecture/authority-carrier.md:51-52`; `docs/guides/support-matrix.md:31` | code emits **`single_expert`** (`signals/load_balance.py:84`; `signals/specialization.py:60,82`); the scoring treatment is identical (both statuses excluded from numerator and denominator), so scores are unaffected — the label is what drifts |

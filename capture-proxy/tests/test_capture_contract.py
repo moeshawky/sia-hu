@@ -29,6 +29,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from capture_proxy.app import CaptureProxyApp
+from capture_proxy.models import CaptureRecord
+from capture_proxy.schema import (
+    NULLABLE_NOT_APPLICABLE,
+    OPTIONAL_UNRECORDED,
+    REQUIRED_FIELDS,
+)
 from capture_proxy.upstream import StreamingUpstreamResponse
 
 CHAT_RESPONSE = {
@@ -532,6 +538,24 @@ class TestSchemaManifest:
         schema = json.loads((base / "schema.json").read_text(encoding="utf-8"))
         assert "rerank" in schema["task_vocabulary"]
         assert "code_summarize" in schema["task_vocabulary"]
+
+    def test_manifest_partition_matches_record_model(self) -> None:
+        """L-04: REQUIRED | NULLABLE | OPTIONAL partition exactly covers CaptureRecord fields.
+
+        The tri-state classes must partition model_fields: union equals all
+        fields, pairwise disjoint. A mutant dropping session_id from
+        REQUIRED_FIELDS must fail this test.
+        Pins: src/capture_proxy/schema.py:31-81 vs src/capture_proxy/models.py:188-320.
+        """
+        required = set(REQUIRED_FIELDS)
+        nullable = set(NULLABLE_NOT_APPLICABLE)
+        optional = set(OPTIONAL_UNRECORDED)
+        model_fields = set(CaptureRecord.model_fields)
+
+        assert required | nullable | optional == model_fields
+        assert not required & nullable
+        assert not required & optional
+        assert not nullable & optional
 
     def test_schema_is_declared_per_run(self, proxy) -> None:
         """A corpus-level schema is overwritten by the next run.

@@ -196,3 +196,71 @@ class TestMalformedTimestampFallback:
         filepath = logger.log(sample_record)
         assert filepath.exists()
         assert "raw" in str(filepath)
+
+
+class TestListIndexIds:
+    """Tests for CaptureLogger.list_index_ids() (logger.py:363-430).
+
+    The reader must skip torn, non-dict, and unreadable index lines
+    without raising — a corrupt index line is diagnostic noise, not a
+    reason to lose the whole id's summary.
+    """
+
+    def test_list_index_ids_skips_torn_line(self, logger, tmp_path):
+        """A malformed JSON line is skipped; only the valid line counts.
+
+        Pins the ``except json.JSONDecodeError: continue`` arm at
+        logger.py:407-408. A mutant that lets the decode error propagate
+        would turn one torn line into a lost summary.
+        """
+        idx_dir = tmp_path / "index" / "sessions"
+        idx_dir.mkdir(parents=True)
+        (idx_dir / "sess-1").write_text(
+            '{"session_id": "sess-1", "ts": "2026-01-01T00:00:00+00:00"}\n{not json\n'
+        )
+        summaries = logger.list_index_ids("sessions")
+        assert len(summaries) == 1
+        assert summaries[0]["id"] == "sess-1"
+        assert summaries[0]["captures"] == 1
+
+    def test_list_index_ids_skips_non_dict_line(self, logger, tmp_path):
+        """A valid-JSON non-dict line is skipped; only the dict counts.
+
+        Pins the ``if not isinstance(entry, dict): continue`` arm at
+        logger.py:409-410. A JSON array is valid JSON but not an index
+        entry; a mutant dropping the isinstance guard would count it.
+        """
+        idx_dir = tmp_path / "index" / "users"
+        idx_dir.mkdir(parents=True)
+        (idx_dir / "user-1").write_text(
+            '[1, 2, 3]\n{"user_id": "user-1", "ts": "2026-01-01T00:00:00+00:00"}\n'
+        )
+        summaries = logger.list_index_ids("users")
+        assert len(summaries) == 1
+        assert summaries[0]["id"] == "user-1"
+        assert summaries[0]["captures"] == 1
+
+    def test_list_index_ids_skips_unreadable_file(self, logger, tmp_path):
+        """An unreadable index file is skipped; the good file survives.
+
+        Pins the ``except OSError: continue`` arm at logger.py:420-421.
+        A mutant that lets the read error propagate would lose the good
+        file's summary alongside the bad one.
+        """
+        idx_dir = tmp_path / "index" / "sessions"
+        idx_dir.mkdir(parents=True)
+        good = idx_dir / "sess-good"
+        bad = idx_dir / "sess-bad"
+        good.write_text(
+            '{"session_id": "sess-good", "ts": "2026-01-01T00:00:00+00:00"}\n'
+        )
+        bad.write_text(
+            '{"session_id": "sess-bad", "ts": "2026-01-01T00:00:00+00:00"}\n'
+        )
+        bad.chmod(0o000)
+        try:
+            summaries = logger.list_index_ids("sessions")
+        finally:
+            bad.chmod(0o644)
+        ids = {s["id"] for s in summaries}
+        assert "sess-good" in ids

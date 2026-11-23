@@ -33,9 +33,6 @@ _CONFIG_PATH = Path.home() / ".config" / "capture-proxy" / "config.toml"
 #: wheel packages the root pyproject.toml must list for all three packages.
 _WHEEL_PACKAGES = ("src/capture_proxy", "src/model_headroom", "src/sia")
 
-#: package dirs that must exist under src/.
-_PACKAGE_DIRS = ("capture_proxy", "model_headroom", "sia")
-
 #: package dirs whose presence is an error (not a warn) if missing.
 _REQUIRED_INITS = ("capture_proxy", "model_headroom", "sia")
 

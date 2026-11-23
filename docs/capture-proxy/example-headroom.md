@@ -16,23 +16,21 @@ uv run capture-proxy \
   --headroom-max-bytes 256M
 ```
 
-- `--headroom all` turns on all six signal keys; the MVP emits only
-  `effective_rank` — the other five are parsed, recorded, and stay `null`
-  in the sidecar (`src/capture_proxy/app.py:337-352` mode parsing;
-  `src/capture_proxy/headroom.py:813` has the only signal branch).
+- `--headroom all` turns on all six signal keys; `effective_rank` writes a weight-pair artifact, `load_balance` writes an activation artifact, and `specialization` writes an expert-weights artifact (when `>=2` same-shape experts resolve); `dead_neurons`, `loss_saturation`, `growth_factor` stay `null` (no producer) (`src/capture_proxy/__main__.py:_build_headroom_writer` at `src/capture_proxy/__main__.py:475-540` mode parsing; `src/capture_proxy/headroom.py:_write_sync` signal branches at `src/capture_proxy/headroom.py:1390-1425`).
 - `--headroom-weights gate` snapshots layer-0 `gate_proj` for MoE models or
   layer-0 `attention` for dense models (BERT/DeBERTa/RoBERTa); `all` captures
   gate+up+down or attention+intermediate+output respectively
-  (`src/capture_proxy/headroom.py:105` `_CAPTURE_LAYER = 0`,
-  `src/capture_proxy/headroom.py:683-696` projection list).
+  (`src/capture_proxy/headroom.py:73` `_CAPTURE_LAYER = 0`,
+  `src/capture_proxy/headroom.py:92-122` `_capture_projs` projection list).
 - `--headroom-max-bytes 256M` caps the float32 payload; over-cap tensors
-  are row-truncated and flagged `truncated: true` with an `error_body`
-  note (`src/capture_proxy/headroom.py:440-442` row truncation,
-  `src/capture_proxy/headroom.py:733-745` `trunc_note`).
+  are row-truncated and flagged `truncated: true` with a `trunc_note`
+  (`src/capture_proxy/headroom.py:623-670` `_tensor_to_bundle` row truncation,
+  `src/capture_proxy/headroom.py:1106-1146` pair-level truncation notes).
 - Env-var equivalent: `CAPTURE_HEADROOM=all CAPTURE_HEADROOM_WEIGHTS=gate
   CAPTURE_HEADROOM_MAX_BYTES=256M uv run capture-proxy --port 8001`.
   Precedence is CLI > env > config file > default
-  (`src/capture_proxy/__main__.py:484-495`).
+  (`src/capture_proxy/__main__.py:_resolve_setting` at `:404-417`; headroom env
+  resolution at `:835-847`).
 
 ## 2. Send one eligible request
 
@@ -65,7 +63,7 @@ matches exactly:
 CAPTURE_MODEL_TASKS='{"roberta-base-mnli":"classification"}'
 ```
 
-Eligibility (`src/capture_proxy/app.py:1846-1922` `_spawn_headroom`):
+Eligibility (`src/capture_proxy/app.py:2372-2467` `_spawn_headroom`):
 `request_type` chat, completion, classification, or image;
 `upstream_status < 400` and no
 `error_body`, `runtime_settings.model_path` pointing at an existing
@@ -79,9 +77,9 @@ Under the day directory (default `{base_path}/headroom/`, typically
 `/root/captures/headroom/`; override with `--headroom-dir`):
 
 - `{capture_id}.headroom.json` — the sidecar (authoritative artifact,
-  written last: `src/capture_proxy/headroom.py:843`)
+  written last: `src/capture_proxy/headroom.py:1441`)
 - `{capture_id}-weight_pairs.json` — compact JSON in the `model_headroom`
-  loader format (`src/capture_proxy/headroom.py:643` `_capture_weight_pairs`)
+  loader format (`src/capture_proxy/headroom.py:1025` `_capture_weight_pairs`)
 
 ```bash
 cat /root/captures/headroom/*/*.headroom.json | python -m json.tool
@@ -123,5 +121,5 @@ maximum score.
 
 With `CAPTURE_HEADROOM` unset or `off`, no writer is constructed — no
 files, no torch/safetensors import, nothing on the response path
-(`src/capture_proxy/app.py:337-339`,
-`src/capture_proxy/headroom.py:13-14`).
+(`src/capture_proxy/__main__.py:_build_headroom_writer` returns `None` at
+`:495-496`; `src/capture_proxy/headroom.py` off-mode invariant at `:19`).

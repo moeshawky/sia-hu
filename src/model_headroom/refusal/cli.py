@@ -359,9 +359,11 @@ def _load_live(
                 load_errors.append(f"{loader_name}: {exc}")
                 model = None
         if model is None:
+            details = "\n".join(f"    - {err}" for err in load_errors)
             print(
                 "error: loading model\n"
                 "  Cause:  failed to load model with available loaders\n"
+                f"  Errors:\n{details}\n"
                 "  Action: Check the model path and try a different loader\n"
                 "  Exit:   1",
                 file=sys.stderr,

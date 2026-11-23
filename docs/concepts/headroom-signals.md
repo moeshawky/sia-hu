@@ -69,12 +69,13 @@ capture-proxy).
 **What it measures:** SVD-based spectral entropy of the tile's weight matrix —
 how much of the tile's own rank ceiling is actually used. The result field is
 `percentage_of_full_rank` = `exp(spectral_entropy) / singular_values_count`, with
-`singular_values_count = min(tile_rows, tile_cols)` (`models/types.py:195`,
-`signals/effective_rank.py:110-114`).
+`singular_values_count = min(tile_rows, tile_cols)` (`singular_values_count` field at
+`models/types.py:207`; the computation and final return at
+`signals/effective_rank.py:119-159`).
 
 The percentage is TILE-relative, never parent-level fidelity. `coverage` and
 `parent_shape` carry the tile-vs-parent relation
-(`signals/effective_rank.py:116-119`), and the human report prints both — tile
+(`signals/effective_rank.py:151-159`), and the human report prints both — tile
 rank/tile ceiling with percentage, plus parent ceiling and coverage beside it.
 A high tile percentage inside a low-coverage parent is expected, not a
 contradiction: a 40-row tile of a rank-40 parent reads 80.6%; of a rank-5120
@@ -82,7 +83,7 @@ parent, 99.97%. Do not present the percentage as parent-level fidelity.
 
 **Data source:** `--weight-pairs-file` (a JSON file of weight/gradient pairs
 carrying `gradient`, `weight`, and `layer_name` — `load_weight_pairs_from_json`,
-`models/loader.py:353-357`; `models/types.py:79-87`) AND, since the GGUF path
+`models/loader.py:385`; `GradientWeightPair` fields at `models/types.py:90-98`) AND, since the GGUF path
 landed, `--model-path` producing `weight_samples` (weights only — never
 presented as gradient data). The sampler covers both a `.gguf` file
 (`models/ternary_sampling.py`) and a safetensors checkpoint directory
@@ -138,8 +139,14 @@ traffic — not yet produced by capture-proxy).
 
 ## R-06 — Load Balance
 
-**Scope:** MoE only. On dense models, marked `not_applicable` and excluded from the
-composite score (weights renormalize over remaining signals).
+**Scope:** MoE only. On dense models, the orchestrator emits status `single_expert`
+(`analysis/orchestrator.py:564-574` runs `analyze_load_balance` with
+`num_experts_architectural=1`; `signals/load_balance.py:84-90` returns
+`signal_status="single_expert"` with `balance_ratio=None`). `single_expert` and
+`not_applicable` are treated identically by the composite — both are excluded from the
+numerator and denominator (`analysis/scoring.py:56,170`) — but the code's emitted label
+on dense is `single_expert`, not `not_applicable` (defect D-7 in
+`PROJECT-ROADMAP.md`; docs/code label drift). Weights renormalize over remaining signals.
 
 **What it measures:** Router entropy / balance ratio — per-expert integer counts
 per layer. Entropy computation, balance ratio, ideal entropy.
@@ -159,8 +166,13 @@ collapsed router scoring 1-of-8 experts reports `computed` with low ratio, not
 
 ## R-07 — Specialization
 
-**Scope:** MoE only. On dense models, marked `not_applicable` and excluded from the
-composite score.
+**Scope:** MoE only. On dense models, the orchestrator emits status `single_expert`
+(`analysis/orchestrator.py:593-601` runs `analyze_specialization` with an empty
+`ExpertWeights`; `signals/specialization.py:60,96` return
+`signal_status="single_expert"`). `single_expert` and `not_applicable` are scored
+identically — excluded from numerator and denominator (`analysis/scoring.py:56,170`) —
+but the code's emitted label on dense is `single_expert`, not `not_applicable`
+(defect D-7; docs/code label drift).
 
 **What it measures:** Pairwise expert cosine similarity, collapse detection. Uses
 worst-case as representative (same as dead_neurons).
@@ -198,17 +210,26 @@ files carrying gradients.
 
 ## Signal status values
 
+`SignalResult.status` is a **12-value literal** at `models/types.py:316-329`:
+`computed, skipped, not_applicable, single_expert, expert_count_unknown, error,
+insufficient_data, degenerate, poor_fit, zero_weight, no_gradient, invalid_evidence`.
+(A per-signal `signal_status` on the individual report dataclasses is a narrower subset;
+the composite reads the `SignalResult.status` wrapper.) Scoring treatment
+(`analysis/scoring.py:53-66,170,182-190`):
+
 | Status | Meaning | Scored as |
 |--------|---------|-----------|
 | `computed` | Signal successfully computed | Real value in [0.0, 1.0] |
-| `skipped` | No data provided | 0.5 (neutral) in composite |
-| `error` | Signal computation failed | 0.0 |
-| `not_applicable` | Signal doesn't apply to this architecture | Excluded from numerator and denominator |
-| `single_expert` | Architectural expert count == 1 | Treated as neutral (balance_ratio = None) |
+| `skipped`, `insufficient_data`, `no_gradient`, `expert_count_unknown` | No scoreable evidence obtained | 0.5 (neutral prior) in composite |
+| `error`, `degenerate`, `poor_fit`, `invalid_evidence`, `zero_weight` | Computation attempted but unusable | 0.0 |
+| `not_applicable`, `single_expert` | Architecturally excluded | Excluded from numerator and denominator |
 
-**Skipped ≠ not_applicable.** Skipped signals score 0.5 (neutral). `not_applicable`
-signals are excluded from the composite entirely. Dense models mark R-06/R-07 as
-`not_applicable`; the composite is computed over the 5 universal signals only.
+**Skipped ≠ not_applicable ≠ single_expert.** Skipped (and other no-evidence statuses)
+score 0.5 (neutral). `not_applicable` and `single_expert` are excluded from the composite
+entirely. On dense models the code emits `single_expert` for R-06/R-07
+(`analysis/orchestrator.py:564-601`), NOT `not_applicable` — the two labels score the
+same (both excluded), but the emitted label is `single_expert` (defect D-7). The composite
+is then computed over the 5 universal signals only.
 
 ---
 

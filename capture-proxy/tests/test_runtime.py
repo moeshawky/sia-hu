@@ -1,5 +1,6 @@
 """Adversarial tests for RuntimeSnapshot — fault injection and boundary testing."""
 
+import json
 import logging
 import subprocess
 from pathlib import Path
@@ -8,6 +9,93 @@ from unittest.mock import patch
 import pytest
 
 from capture_proxy.runtime import RuntimeSnapshot
+
+
+class TestInterventionMetadata:
+    """Adversarial: intervention provenance (ticket 008 I11/E8)."""
+
+    ENV = "SIA_REFUSAL_INTERVENTION_JSON"
+
+    def test_unset_env_has_no_intervention(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(self.ENV, raising=False)
+        assert RuntimeSnapshot._intervention_metadata() is None
+
+    def test_blank_env_has_no_intervention(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(self.ENV, "   ")
+        assert RuntimeSnapshot._intervention_metadata() is None
+
+    def test_valid_record_returned_verbatim(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        record = {
+            "type": "refusal_ablation",
+            "artifact_sha256": "4f493093" + "0" * 56,
+            "lambda": 1.0,
+            "fold_mode": "mean",
+            "capture_width": 10240,
+            "stream_count": 4,
+        }
+        monkeypatch.setenv(self.ENV, json.dumps(record))
+        parsed = RuntimeSnapshot._intervention_metadata()
+        assert parsed == record
+
+    def test_malformed_json_degrades_with_warning(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv(self.ENV, "{not json")
+        with caplog.at_level(logging.WARNING):
+            assert RuntimeSnapshot._intervention_metadata() is None
+        assert "not valid JSON" in caplog.text
+
+    def test_json_array_degrades_with_warning(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv(self.ENV, "[1, 2, 3]")
+        with caplog.at_level(logging.WARNING):
+            assert RuntimeSnapshot._intervention_metadata() is None
+        assert "not a JSON object" in caplog.text
+
+    def test_settings_carry_intervention_for_every_backend(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(self.ENV, '{"type": "refusal_ablation", "lambda": 0.5}')
+        with patch.object(RuntimeSnapshot, "_command_output", return_value=""):
+            for backend in ("llamacpp", "vllm", "sglang"):
+                snapshot = RuntimeSnapshot(str(tmp_path / backend), backend)
+                assert snapshot.settings["intervention"] == {
+                    "type": "refusal_ablation",
+                    "lambda": 0.5,
+                }
+
+    def test_undeclared_upstream_stays_control(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(self.ENV, raising=False)
+        with patch.object(RuntimeSnapshot, "_command_output", return_value=""):
+            snapshot = RuntimeSnapshot(str(tmp_path), "sglang")
+        assert "intervention" not in snapshot.settings
+
+    def test_control_and_ablated_arms_get_distinct_run_ids(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # C-CAUSE-44a/44b: the intervention record is part of the run_id identity,
+        # so control vs ablated arms hash to distinct run_ids and distinct
+        # manifests; control (no intervention) keeps the pre-existing run_id.
+        base = str(tmp_path / "captures")
+        with patch.object(RuntimeSnapshot, "_command_output", return_value=""):
+            control = RuntimeSnapshot(base, "vllm")
+            monkeypatch.setenv(self.ENV, '{"type": "refusal_ablation", "lambda": 1.0}')
+            ablated = RuntimeSnapshot(base, "vllm")
+        assert control.run_id != ablated.run_id
+        assert control.run_id.startswith("run_")
+        assert ablated.run_id.startswith("run_")
+        # Distinct manifests, one per arm (no clobbering).
+        assert (Path(base) / "runs" / f"{control.run_id}.json").exists()
+        assert (Path(base) / "runs" / f"{ablated.run_id}.json").exists()
 
 
 class TestIntOrNone:

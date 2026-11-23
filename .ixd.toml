@@ -10,7 +10,6 @@
 
 watch_roots = [
     "src",
-    "capture-proxy",
     "model_headroom",
     "scripts",
     "tools",

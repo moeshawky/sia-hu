@@ -292,6 +292,60 @@ class TestLivePath:
         assert "expects a HuggingFace model directory" not in err
         assert "no config.json" not in err
 
+    def test_load_errors_are_surfaced_when_both_loaders_fail(
+        self, tmp_path: Path, capsys, monkeypatch
+    ) -> None:
+        # C-CAUSE-4: collected load_errors must be surfaced to the operator,
+        # not silently discarded.
+        try:
+            import transformers
+        except ImportError:
+            pytest.skip("transformers not installed")
+        harmful = tmp_path / "harmful.txt"
+        harmless = tmp_path / "harmless.txt"
+        harmful.write_text("prompt one\n")
+        harmless.write_text("prompt one\n")
+
+        def _fake_tokenizer(*args, **kwargs):
+            return object()
+
+        def _raise_causal(*args, **kwargs):
+            raise OSError("causal loader unavailable")
+
+        def _raise_image(*args, **kwargs):
+            raise ValueError("image loader unavailable")
+
+        model_dir = tmp_path / "model_dir"
+        model_dir.mkdir()
+        (model_dir / "config.json").write_text(json.dumps({}))
+
+        monkeypatch.setattr(
+            transformers.AutoTokenizer, "from_pretrained", _fake_tokenizer
+        )
+        monkeypatch.setattr(
+            transformers.AutoModelForCausalLM, "from_pretrained", _raise_causal
+        )
+        monkeypatch.setattr(
+            transformers.AutoModelForImageTextToText,
+            "from_pretrained",
+            _raise_image,
+        )
+        rc = main(
+            [
+                "--model-path",
+                str(model_dir),
+                "--harmful-prompts",
+                str(harmful),
+                "--harmless-prompts",
+                str(harmless),
+            ]
+        )
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert "error: loading model" in err
+        assert "AutoModelForCausalLM: causal loader unavailable" in err
+        assert "AutoModelForImageTextToText: image loader unavailable" in err
+
 
 class TestRecoveryPath:
     def test_weight_deltas_recover_a_direction(self, tmp_path: Path, capsys) -> None:
@@ -341,6 +395,28 @@ class TestReportRendering:
     def test_json_report_includes_direction(self) -> None:
         payload = json.loads(generate_refusal_json(self._report()))
         assert len(payload["refusal_direction"]) == 8
+
+    def test_json_capture_point_and_source_derive_from_axis(self) -> None:
+        # C-CAUSE-2: report must mirror artifact.py's axis-derived capture_point
+        # / source rather than hardcoding activation-difference provenance.
+        from model_headroom.models.types import RefusalDirectionReport
+
+        base = {
+            "axis": "mean_difference",
+            "hidden_size": 2,
+            "harmful_count": 0,
+            "harmless_count": 0,
+            "layer_stats": [],
+        }
+        activation = RefusalDirectionReport(**base)
+        payload = json.loads(generate_refusal_json(activation))
+        assert payload["capture_point"] == "last_token_residual"
+        assert payload["source"] == "base_model_activation_difference"
+
+        weight_delta = RefusalDirectionReport(**{**base, "axis": "weight_delta_svd"})
+        payload = json.loads(generate_refusal_json(weight_delta))
+        assert payload["capture_point"] == "weight_delta"
+        assert payload["source"] == "weight_delta_recovery"
 
     def test_nan_cohen_d_serialises_as_null(self) -> None:
         from model_headroom.models.types import (
